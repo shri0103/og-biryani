@@ -45,7 +45,7 @@ const Menu = ({ addToCart, cart = [] }) => {
         const checkTime = () => {
             const now = new Date();
             const h = now.getHours();
-            setIsOrderingLocked(false); // TEMP: unlocked for testing — original: (h < 6 || h >= 12)
+            setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
         };
         checkTime();
         const interval = setInterval(checkTime, 30000);
@@ -55,7 +55,7 @@ const Menu = ({ addToCart, cart = [] }) => {
     useEffect(() => {
         const fetchMenu = async () => {
             try {
-                const res = await axios.get('http://localhost:5000/api/menu');
+                const res = await axios.get(`${import.meta.env.VITE_API_URL}/menu`);
                 setItems(res.data.data);
             } catch (error) {
                 console.error("Error fetching menu:", error);

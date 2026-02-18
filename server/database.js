@@ -112,7 +112,7 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 db.get("SELECT count(*) as count FROM admin_users", [], (err, row) => {
                     if (err) return;
                     if (row.count === 0) {
-                        const hashedPassword = bcrypt.hashSync('og2026', 10);
+                        const hashedPassword = bcrypt.hashSync('OG@Biriyani#2026!Secure', 12);
                         db.run(
                             'INSERT INTO admin_users (username, password) VALUES (?, ?)',
                             ['admin', hashedPassword],
@@ -120,7 +120,7 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                                 if (err) {
                                     console.error("Error seeding admin:", err);
                                 } else {
-                                    console.log("Default admin created (admin / og2026)");
+                                    console.log("Default admin created (admin / OG@Biriyani#2026!Secure)");
                                 }
                             }
                         );

@@ -1,12 +1,13 @@
 {
-  "name": "og-biryani-root",
+  "name": "og-biryani",
   "version": "1.0.0",
-  "description": "Root script to run full stack OG Biryani app",
+  "description": "OG Biryani - Full Stack Food Ordering App",
   "scripts": {
     "server": "npm start --prefix server",
     "client": "npm run dev --prefix client",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "start": "npm run dev"
+    "build": "npm install --prefix client && npm run build --prefix client && npm install --prefix server",
+    "start": "node server/index.js"
   },
   "keywords": [],
   "author": "",

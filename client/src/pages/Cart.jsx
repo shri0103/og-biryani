@@ -37,7 +37,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
         const checkTime = () => {
             const now = new Date();
             const h = now.getHours();
-            setIsOrderingLocked(false); // TEMP: unlocked for testing — original: (h < 6 || h >= 12)
+            setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
         };
         checkTime();
         const interval = setInterval(checkTime, 30000);
@@ -67,7 +67,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
         };
 
         try {
-            const apiRes = await axios.post('http://localhost:5000/api/orders', order);
+            const apiRes = await axios.post(`${import.meta.env.VITE_API_URL}/orders`, order);
             const orderToken = apiRes.data.data.orderToken;
 
             // Save tracking token to localStorage so customer never loses it
@@ -82,7 +82,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                 `\n\n${t('waTotal')}: ₹${finalTotal}\n${t('waName')}: ${customerName}\n${t('waPhone')}: ${customerPhone}` +
                 `\n\n${t('waTrack')}: ${window.location.origin}/track/${orderToken}\n━━━━━━━━━━━━━━━━━━`;
 
-            const whatsappUrl = `https://wa.me/917448837239?text=${encodeURIComponent(message)}`;
+            const whatsappUrl = `https://wa.me/919363164680?text=${encodeURIComponent(message)}`;
             window.open(whatsappUrl, '_blank');
 
             setOrderData({
@@ -381,7 +381,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                                 if (!couponCode.trim()) return;
                                 setApplyingCoupon(true); setCouponError('');
                                 try {
-                                    const res = await axios.post('http://localhost:5000/api/coupons/validate', { code: couponCode });
+                                    const res = await axios.post(`${import.meta.env.VITE_API_URL}/coupons/validate`, { code: couponCode });
                                     setCouponDiscount(res.data.data.discount_percent);
                                     setCouponApplied(res.data.data.code);
                                 } catch (err) {

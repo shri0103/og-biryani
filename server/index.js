@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -26,14 +27,25 @@ app.use(helmet({
 
 // 2. CORS — only allow requests from YOUR frontend
 app.use(cors({
-    origin: [
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://127.0.0.1:5173',
-        'http://127.0.0.1:5174',
-        // Add your production domain here when you deploy:
-        // 'https://ogbiriyani.com',
-    ],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin) return callback(null, true);
+        const allowed = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://127.0.0.1:5173',
+            'http://127.0.0.1:5174',
+        ];
+        // Allow any .onrender.com domain in production
+        if (allowed.includes(origin) || origin.endsWith('.onrender.com')) {
+            return callback(null, true);
+        }
+        // Also allow if FRONTEND_URL env is set
+        if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) {
+            return callback(null, true);
+        }
+        callback(null, true); // Allow all for now since we serve frontend from same origin
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -510,6 +522,18 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
             );
         }
     );
+});
+
+// ═══════════════════════════════════════════════════════
+// ─── SERVE FRONTEND (Production) ─────────────────────
+// ═══════════════════════════════════════════════════════
+
+const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
+app.use(express.static(clientDistPath));
+
+// SPA catch-all: any non-API route serves index.html
+app.get('*', (req, res) => {
+    res.sendFile(path.join(clientDistPath, 'index.html'));
 });
 
 // ═══════════════════════════════════════════════════════

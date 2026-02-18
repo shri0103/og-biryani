@@ -28,7 +28,7 @@ const OrderHistory = () => {
         setLoading(true);
         setError('');
         try {
-            const res = await axios.get(`http://localhost:5000/api/orders/history/${phone.trim()}`);
+            const res = await axios.get(`${import.meta.env.VITE_API_URL}/orders/history/${phone.trim()}`);
             setOrders(res.data.data || []);
         } catch (err) {
             setError('Could not fetch orders. Please try again.');

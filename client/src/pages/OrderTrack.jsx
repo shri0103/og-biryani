@@ -76,7 +76,7 @@ const FeedbackForm = ({ token, existingRating, existingFeedback }) => {
         if (rating === 0) return;
         setSubmitting(true);
         try {
-            await axios.post(`http://localhost:5000/api/orders/${token}/feedback`, { rating, feedback });
+            await axios.post(`${import.meta.env.VITE_API_URL}/orders/${token}/feedback`, { rating, feedback });
             setSubmitted(true);
         } catch (err) {
             console.error('Feedback error:', err);
@@ -174,7 +174,7 @@ const OrderTrack = () => {
 
     const fetchOrder = async () => {
         try {
-            const res = await axios.get(`http://localhost:5000/api/orders/track/${token}`);
+            const res = await axios.get(`${import.meta.env.VITE_API_URL}/orders/track/${token}`);
             setOrder(res.data.data);
             setError(null);
         } catch (err) {

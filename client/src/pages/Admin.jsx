@@ -33,7 +33,7 @@ const playNotificationSound = async () => {
     } catch (e) { console.warn('Sound failed:', e); }
 };
 
-const API = 'http://localhost:5000/api';
+const API = import.meta.env.VITE_API_URL;
 const STATUS_FLOW = ['Received', 'Preparing', 'Ready', 'Delivered'];
 const STATUS_COLORS = {
     Received: { bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30', dot: 'bg-blue-400' },
@@ -1042,12 +1042,12 @@ const Admin = () => {
                             onClick={async () => {
                                 if (!couponForm.code || !couponForm.discount_percent) return;
                                 try {
-                                    await axios.post('http://localhost:5000/api/coupons', couponForm, {
+                                    await axios.post(`${API}/coupons`, couponForm, {
                                         headers: { Authorization: `Bearer ${token}` }
                                     });
                                     setCouponForm({ code: '', discount_percent: '', max_uses: '100' });
                                     // Refresh coupons
-                                    const res = await axios.get('http://localhost:5000/api/coupons', {
+                                    const res = await axios.get(`${API}/coupons`, {
                                         headers: { Authorization: `Bearer ${token}` }
                                     });
                                     setCoupons(res.data.data || []);
@@ -1070,7 +1070,7 @@ const Admin = () => {
                                 <button
                                     onClick={async () => {
                                         try {
-                                            const res = await axios.get('http://localhost:5000/api/coupons', {
+                                            const res = await axios.get(`${API}/coupons`, {
                                                 headers: { Authorization: `Bearer ${token}` }
                                             });
                                             setCoupons(res.data.data || []);
@@ -1098,7 +1098,7 @@ const Admin = () => {
                                     <button
                                         onClick={async () => {
                                             try {
-                                                await axios.delete(`http://localhost:5000/api/coupons/${coupon.id}`, {
+                                                await axios.delete(`${API}/coupons/${coupon.id}`, {
                                                     headers: { Authorization: `Bearer ${token}` }
                                                 });
                                                 setCoupons(prev => prev.filter(c => c.id !== coupon.id));

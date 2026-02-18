@@ -108,18 +108,30 @@ const RepeatLastOrder = ({ addToCart }) => {
 const CountdownTimer = () => {
     const { t } = useLang();
     const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0 });
+    const [isOpen, setIsOpen] = useState(true);
 
     useEffect(() => {
         const interval = setInterval(() => {
             const now = new Date();
-            const target = new Date();
-            target.setHours(12, 0, 0, 0);
+            const h = now.getHours();
+            const currentlyOpen = h >= 6 && h < 13; // 6 AM to 1 PM
+            setIsOpen(currentlyOpen);
 
-            if (now > target) {
-                target.setDate(target.getDate() + 1);
+            const target = new Date();
+            if (currentlyOpen) {
+                // Count down to closing time (1 PM today)
+                target.setHours(13, 0, 0, 0);
+            } else {
+                // Count down to opening time (6 AM)
+                target.setHours(6, 0, 0, 0);
+                if (h >= 13) {
+                    // After 1 PM — next opening is tomorrow 6 AM
+                    target.setDate(target.getDate() + 1);
+                }
+                // Before 6 AM — target is today 6 AM (already set)
             }
 
-            const diff = target - now;
+            const diff = Math.max(0, target - now);
             setTimeLeft({
                 hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
                 minutes: Math.floor((diff / (1000 * 60)) % 60),
@@ -143,9 +155,11 @@ const CountdownTimer = () => {
 
     return (
         <div className="flex flex-col items-center gap-4">
-            <div className="flex items-center gap-2 text-ember-500">
-                <span className="w-2 h-2 rounded-full bg-ember-500 animate-pulse-dot" />
-                <span className="text-sm font-medium tracking-wide uppercase">{t('ordersCloseAt')}</span>
+            <div className={`flex items-center gap-2 ${isOpen ? 'text-ember-500' : 'text-green-accent'}`}>
+                <span className={`w-2 h-2 rounded-full animate-pulse-dot ${isOpen ? 'bg-ember-500' : 'bg-green-accent'}`} />
+                <span className="text-sm font-medium tracking-wide uppercase">
+                    {isOpen ? t('ordersCloseAt') : t('ordersReopenAt')}
+                </span>
             </div>
             <div className="flex gap-3">
                 <TimeBox value={timeLeft.hours} label={t('hours')} />
@@ -298,7 +312,7 @@ const Home = ({ orderCount = 0, addToCart }) => {
                 transition={{ delay: 0.8, duration: 0.8 }}
                 className="glass-card px-8 py-6 text-center glow-gold"
             >
-                <p className="text-lg md:text-xl text-gold-200 font-light">Orders Open <span className="font-semibold text-gold-400">6:00 AM – 12:00 PM</span></p>
+                <p className="text-lg md:text-xl text-gold-200 font-light">Orders Open <span className="font-semibold text-gold-400">6:00 AM – 1:00 PM</span></p>
                 <div className="h-[1px] bg-gradient-to-r from-transparent via-gold-600/30 to-transparent my-3" />
                 <p className="text-base md:text-lg font-semibold text-green-accent flex items-center justify-center gap-2">
                     <Clock size={16} />
@@ -330,56 +344,6 @@ const Home = ({ orderCount = 0, addToCart }) => {
             {/* Reviews Section */}
             <Reviews />
 
-            {/* Referral Card */}
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.2 }}
-                className="glass-card p-6 w-full max-w-lg mx-auto"
-            >
-                <div className="text-center mb-4">
-                    <h3 className="text-lg font-serif font-bold text-gradient-gold">Refer a Friend 🎁</h3>
-                    <p className="text-xs text-gold-300/40 mt-1">Share your code & get a surprise treat on your next order!</p>
-                </div>
-                {(() => {
-                    let code = localStorage.getItem('referralCode');
-                    if (!code) {
-                        code = 'OG' + Math.random().toString(36).substr(2, 6).toUpperCase();
-                        localStorage.setItem('referralCode', code);
-                    }
-                    const referralLink = `${window.location.origin}?ref=${code}`;
-                    return (
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-center gap-3 bg-dark-700/50 px-4 py-3 rounded-xl border border-gold-600/20">
-                                <span className="text-gold-400 font-bold text-lg tracking-widest font-mono">{code}</span>
-                            </div>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => {
-                                        const msg = `Hey! Try OG Biriyani — amazing homemade biryani! Use my code ${code} for a special treat: ${referralLink}`;
-                                        window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
-                                    }}
-                                    className="flex-1 py-2 rounded-xl text-sm font-semibold bg-green-accent/15 text-green-accent border border-green-accent/30 flex items-center justify-center gap-2 hover:bg-green-accent/25 transition-all"
-                                >
-                                    <Share2 size={14} />
-                                    WhatsApp
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(referralLink);
-                                        alert('Referral link copied!');
-                                    }}
-                                    className="flex-1 py-2 rounded-xl text-sm font-semibold border border-gold-600/30 text-gold-400 flex items-center justify-center gap-2 hover:bg-gold-500/10 transition-all"
-                                >
-                                    <Copy size={14} />
-                                    Copy Link
-                                </button>
-                            </div>
-                        </div>
-                    );
-                })()}
-            </motion.div>
-
             {/* Google Maps Location */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -390,7 +354,7 @@ const Home = ({ orderCount = 0, addToCart }) => {
                 <h3 className="text-xl font-serif font-bold text-gradient-gold text-center mb-4">{t('findUs')} 📍</h3>
                 <div className="glass-card overflow-hidden rounded-2xl">
                     <iframe
-                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3886.0!2d80.2!3d13.0!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2sChennai!5e0!3m2!1sen!2sin!4v1"
+                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3916.5!2d76.95!3d11.0!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3ba859af2f461b59%3A0x5e3e9b0a7d1b4b0!2sSelvapuram%2C%20Coimbatore%2C%20Tamil%20Nadu!5e0!3m2!1sen!2sin!4v1"
                         width="100%"
                         height="250"
                         style={{ border: 0, filter: 'invert(90%) hue-rotate(180deg) brightness(1.1) contrast(0.9)' }}
@@ -402,10 +366,10 @@ const Home = ({ orderCount = 0, addToCart }) => {
                     <div className="p-4 flex items-center justify-between">
                         <div className="flex items-center gap-2 text-gold-300/50 text-sm">
                             <MapPin size={14} className="text-gold-500" />
-                            Chennai, Tamil Nadu
+                            Selvapuram, Coimbatore
                         </div>
                         <a
-                            href="https://maps.google.com/?q=Chennai,Tamil+Nadu"
+                            href="https://maps.google.com/?q=Selvapuram,Coimbatore,Tamil+Nadu"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-gold-400 hover:text-gold-300 font-medium flex items-center gap-1 transition-colors"
