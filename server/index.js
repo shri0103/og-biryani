@@ -11,7 +11,7 @@ const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'og-biryani-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-in-env';
 const JWT_EXPIRY = '8h';
 
 // ═══════════════════════════════════════════════════════
@@ -346,7 +346,7 @@ app.patch('/api/orders/bulk-advance', authMiddleware, (req, res) => {
     }
 
     db.run(
-        `UPDATE orders SET status = ? WHERE status = ? AND date(created_at) = date('now')`,
+        `UPDATE orders SET status = ? WHERE status = ? AND DATE(created_at) = CURDATE()`,
         [toStatus, fromStatus],
         function (err) {
             if (err) return safeError(res, 500, 'Bulk update failed', err);
@@ -466,7 +466,7 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
 
     db.get(
         `SELECT COUNT(*) as total_orders, COALESCE(SUM(total_amount), 0) as total_revenue 
-         FROM orders WHERE date(created_at) = date('now')`,
+         FROM orders WHERE DATE(created_at) = CURDATE()`,
         [],
         (err, today) => {
             if (err) return safeError(res, 500, 'Failed to load stats', err);
@@ -498,16 +498,16 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
                             .map(([name, count]) => ({ name, count }));
 
                         db.all(
-                            `SELECT date(created_at) as day, COUNT(*) as orders, COALESCE(SUM(total_amount), 0) as revenue
-                             FROM orders WHERE created_at >= date('now', '-7 days')
-                             GROUP BY date(created_at) ORDER BY day`,
+                            `SELECT DATE(created_at) as day, COUNT(*) as orders, COALESCE(SUM(total_amount), 0) as revenue
+                             FROM orders WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                             GROUP BY DATE(created_at) ORDER BY day`,
                             [],
                             (err, weekly) => {
                                 if (err) return safeError(res, 500, 'Failed to load stats', err);
                                 stats.weekly = weekly || [];
 
                                 db.all(
-                                    `SELECT status, COUNT(*) as count FROM orders WHERE date(created_at) = date('now') GROUP BY status`,
+                                    `SELECT status, COUNT(*) as count FROM orders WHERE DATE(created_at) = CURDATE() GROUP BY status`,
                                     [],
                                     (err, statusBreakdown) => {
                                         if (err) return safeError(res, 500, 'Failed to load stats', err);
