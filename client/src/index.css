@@ -1,0 +1,282 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  /* Gold Palette — warm, rich, luxury feel */
+  --color-gold-100: #FFF8E1;
+  --color-gold-200: #FFECB3;
+  --color-gold-300: #F5E6A3;
+  --color-gold-400: #E8C547;
+  --color-gold-500: #D4AF37;
+  --color-gold-600: #B8962A;
+  --color-gold-700: #8B6F1E;
+  --color-gold-800: #5C4A14;
+  --color-gold-900: #3D2E0A;
+
+  /* Lighter Dark Palette — warm charcoal, NOT pure black */
+  --color-dark-900: #1A1A2E;
+  --color-dark-800: #222240;
+  --color-dark-700: #2D2D4A;
+  --color-dark-600: #383854;
+  --color-dark-500: #44445E;
+  --color-dark-400: #555570;
+
+  /* Accent Colors */
+  --color-ember-500: #E85D3A;
+  --color-ember-600: #C74B2E;
+  --color-green-accent: #34D399;
+
+  /* Fonts */
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Outfit", system-ui, sans-serif;
+}
+
+/* ── Base ──────────────────────────────────────────── */
+body {
+  @apply bg-dark-900 text-gold-300 font-sans;
+  background: linear-gradient(135deg, #1A1A2E 0%, #16213E 50%, #1A1A2E 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+::selection {
+  background-color: rgba(212, 175, 55, 0.3);
+  color: #FFF8E1;
+}
+
+/* ── Utility Classes ──────────────────────────────── */
+
+/* Glassmorphism Card */
+.glass-card {
+  background: rgba(34, 34, 64, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(212, 175, 55, 0.15);
+  border-radius: 16px;
+}
+
+.glass-card-light {
+  background: rgba(45, 45, 74, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(212, 175, 55, 0.1);
+  border-radius: 12px;
+}
+
+/* Gold Gradient Text */
+.text-gradient-gold {
+  background: linear-gradient(135deg, #F5E6A3, #D4AF37, #E8C547);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gold Glow */
+.glow-gold {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.15),
+    0 0 40px rgba(212, 175, 55, 0.05);
+}
+
+.glow-gold-strong {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.25),
+    0 0 60px rgba(212, 175, 55, 0.1);
+}
+
+/* Ornamental Divider */
+.ornament-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+}
+
+.ornament-divider::before,
+.ornament-divider::after {
+  content: '';
+  height: 1px;
+  width: 60px;
+  background: linear-gradient(90deg, transparent, #D4AF37, transparent);
+}
+
+/* Shimmer Animation on Buttons */
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transition: left 0.5s ease;
+}
+
+.btn-shimmer:hover::after {
+  left: 100%;
+}
+
+/* Floating Animation */
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Pulse Dot */
+@keyframes pulse-dot {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/* ── Scrollbar ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1A1A2E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #D4AF37, #8B6F1E);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #E8C547, #D4AF37);
+}
+
+/* ── Smooth Transitions ──────────────────────────── */
+a,
+button,
+input,
+select,
+textarea {
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Disable transitions for animated elements */
+[class*="animate-"],
+[class*="motion-"] {
+  transition-property: none !important;
+}
+
+/* ── Skeleton Loading Shimmer ────────────────────── */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg,
+      rgba(45, 45, 74, 0.5) 25%,
+      rgba(212, 175, 55, 0.08) 50%,
+      rgba(45, 45, 74, 0.5) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ── Card Hover Glow ─────────────────────────────── */
+.card-hover-glow {
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.card-hover-glow:hover {
+  box-shadow:
+    0 0 25px rgba(212, 175, 55, 0.12),
+    0 0 50px rgba(212, 175, 55, 0.06),
+    0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* ═══ Festive Theme Overrides ═══════════════════════ */
+
+body.theme-diwali .text-gradient-gold {
+  background: linear-gradient(135deg, #FF6B35, #F7C948, #FF6B35) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+}
+
+body.theme-diwali .glow-gold,
+body.theme-diwali .glow-gold-strong {
+  box-shadow: 0 0 25px rgba(255, 107, 53, 0.2), 0 0 50px rgba(247, 201, 72, 0.1) !important;
+}
+
+body.theme-ramadan .text-gradient-gold {
+  background: linear-gradient(135deg, #2DD4BF, #34D399, #2DD4BF) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+}
+
+body.theme-ramadan .glow-gold,
+body.theme-ramadan .glow-gold-strong {
+  box-shadow: 0 0 25px rgba(45, 212, 191, 0.2), 0 0 50px rgba(52, 211, 153, 0.1) !important;
+}
+
+body.theme-christmas .text-gradient-gold {
+  background: linear-gradient(135deg, #EF4444, #22C55E, #EF4444) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+}
+
+body.theme-christmas .glow-gold,
+body.theme-christmas .glow-gold-strong {
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.15), 0 0 50px rgba(34, 197, 94, 0.1) !important;
+}
+
+body.theme-pongal .text-gradient-gold {
+  background: linear-gradient(135deg, #FBBF24, #F59E0B, #FBBF24) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+}
+
+body.theme-pongal .glow-gold,
+body.theme-pongal .glow-gold-strong {
+  box-shadow: 0 0 25px rgba(251, 191, 36, 0.2), 0 0 50px rgba(245, 158, 11, 0.1) !important;
+}
+
+body.theme-eid .text-gradient-gold {
+  background: linear-gradient(135deg, #A78BFA, #7C3AED, #A78BFA) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+}
+
+body.theme-eid .glow-gold,
+body.theme-eid .glow-gold-strong {
+  box-shadow: 0 0 25px rgba(167, 139, 250, 0.2), 0 0 50px rgba(124, 58, 237, 0.1) !important;
+}

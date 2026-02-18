@@ -1,0 +1,17 @@
+{
+  "name": "og-biryani-root",
+  "version": "1.0.0",
+  "description": "Root script to run full stack OG Biryani app",
+  "scripts": {
+    "server": "npm start --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "start": "npm run dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
