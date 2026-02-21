@@ -1,9 +1,12 @@
 import React from 'react';
+import { useTheme } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const CartDrawer = ({ isOpen, onClose, cart, updateQuantity, removeFromCart }) => {
+    const { theme } = useTheme();
+    const isDark = theme === 'dark';
     const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -28,8 +31,12 @@ const CartDrawer = ({ isOpen, onClose, cart, updateQuantity, removeFromCart }) =
                         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
                         className="fixed right-0 top-0 bottom-0 w-full max-w-md z-[70] flex flex-col"
                         style={{
-                            background: 'linear-gradient(180deg, #1A1A2E 0%, #16213E 100%)',
-                            borderLeft: '1px solid rgba(212, 175, 55, 0.15)'
+                            background: isDark
+                                ? 'linear-gradient(180deg, #1A1A2E 0%, #16213E 100%)'
+                                : 'linear-gradient(180deg, #FFF8F0 0%, #FEF3E2 100%)',
+                            borderLeft: isDark
+                                ? '1px solid rgba(212, 175, 55, 0.15)'
+                                : '1px solid rgba(194, 120, 45, 0.15)'
                         }}
                     >
                         {/* Header */}
@@ -79,7 +86,8 @@ const CartDrawer = ({ isOpen, onClose, cart, updateQuantity, removeFromCart }) =
                                                         <span className="text-xs font-bold text-gold-300 w-4 text-center tabular-nums">{item.quantity}</span>
                                                         <button
                                                             onClick={() => updateQuantity(item.id, 1)}
-                                                            className="w-6 h-6 rounded flex items-center justify-center text-gold-400 hover:bg-gold-500/15"
+                                                            disabled={item.quantity >= 20}
+                                                            className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${item.quantity >= 20 ? 'text-gold-300/30 cursor-not-allowed bg-transparent' : 'text-gold-400 hover:bg-gold-500/15'}`}
                                                         >
                                                             <Plus size={12} />
                                                         </button>

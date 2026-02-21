@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, Search, Package, Clock, ChevronRight } from 'lucide-react';
+import { Phone, Search, Package, Clock, ChevronRight, Star, Send } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useLang } from '../App';
@@ -10,6 +10,116 @@ const STATUS_COLORS = {
     Preparing: 'text-amber-400 bg-amber-500/15 border-amber-500/30',
     Ready: 'text-green-400 bg-green-500/15 border-green-500/30',
     Delivered: 'text-gold-400 bg-gold-500/15 border-gold-500/30',
+};
+
+const InlineReview = ({ order }) => {
+    const { t } = useLang();
+    const [expanded, setExpanded] = useState(false);
+    const [rating, setRating] = useState(order.rating || 0);
+    const [feedback, setFeedback] = useState(order.feedback || '');
+    const [hoverRating, setHoverRating] = useState(0);
+    const [submitted, setSubmitted] = useState(order.rating > 0);
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleSubmit = async () => {
+        if (rating === 0) return;
+        setSubmitting(true);
+        try {
+            await axios.post(`${import.meta.env.VITE_API_URL}/orders/${order.order_token}/feedback`, { rating, feedback });
+            setSubmitted(true);
+            setExpanded(false);
+        } catch (err) {
+            console.error('Feedback error:', err);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // Already reviewed — show stars
+    if (submitted) {
+        return (
+            <div className="flex items-center gap-2 pt-2 border-t border-gold-700/15">
+                <div className="flex gap-0.5">
+                    {[1, 2, 3, 4, 5].map(s => (
+                        <Star key={s} size={12} className={s <= rating ? 'text-gold-400 fill-gold-400' : 'text-dark-500'} />
+                    ))}
+                </div>
+                <span className="text-[10px] text-gold-300/40">Your review</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="pt-2 border-t border-gold-700/15">
+            {!expanded ? (
+                <button
+                    onClick={() => setExpanded(true)}
+                    className="flex items-center gap-2 text-xs text-gold-400/70 hover:text-gold-400 transition-colors w-full justify-center py-1"
+                >
+                    <Star size={12} />
+                    Rate this order
+                </button>
+            ) : (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-3"
+                >
+                    {/* Stars */}
+                    <div className="flex justify-center gap-1.5">
+                        {[1, 2, 3, 4, 5].map(s => (
+                            <button
+                                key={s}
+                                onMouseEnter={() => setHoverRating(s)}
+                                onMouseLeave={() => setHoverRating(0)}
+                                onClick={() => setRating(s)}
+                                className="transition-transform hover:scale-125"
+                            >
+                                <Star
+                                    size={22}
+                                    className={`transition-colors ${s <= (hoverRating || rating) ? 'text-gold-400 fill-gold-400' : 'text-dark-500 hover:text-gold-500/30'}`}
+                                />
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Feedback text */}
+                    <AnimatePresence>
+                        {rating > 0 && (
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                                <textarea
+                                    value={feedback}
+                                    onChange={e => setFeedback(e.target.value)}
+                                    placeholder="Tell us about your experience..."
+                                    className="w-full px-3 py-2 bg-dark-700/50 border border-gold-600/20 rounded-lg text-gold-200 text-xs placeholder:text-gold-300/20 focus:outline-none focus:border-gold-500/50 transition-colors resize-none"
+                                    rows={2}
+                                />
+                                <div className="flex gap-2 mt-2">
+                                    <button
+                                        onClick={() => { setExpanded(false); setRating(0); setFeedback(''); }}
+                                        className="flex-1 py-2 text-xs text-gold-300/40 hover:text-gold-300/60 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleSubmit}
+                                        disabled={submitting}
+                                        className="flex-1 py-2 bg-gradient-to-r from-gold-600 to-gold-500 text-dark-900 font-bold rounded-lg btn-shimmer flex items-center justify-center gap-1.5 text-xs"
+                                    >
+                                        {submitting ? (
+                                            <div className="w-3 h-3 border-2 border-dark-900/30 border-t-dark-900 rounded-full animate-spin" />
+                                        ) : (
+                                            <><Send size={11} /> Submit</>
+                                        )}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+            )}
+        </div>
+    );
 };
 
 const OrderHistory = () => {
@@ -70,10 +180,7 @@ const OrderHistory = () => {
                         {loading ? (
                             <div className="w-5 h-5 border-2 border-dark-900/30 border-t-dark-900 rounded-full animate-spin" />
                         ) : (
-                            <>
-                                <Search size={16} />
-                                {t('search')}
-                            </>
+                            <><Search size={16} /> {t('search')}</>
                         )}
                     </button>
                 </div>
@@ -137,6 +244,9 @@ const OrderHistory = () => {
                                                     <span key={i}>{item.quantity || 1}× {item.name}{i < items.length - 1 ? ' • ' : ''}</span>
                                                 ))}
                                             </div>
+                                            {order.status === 'Delivered' && order.order_token && (
+                                                <InlineReview order={order} />
+                                            )}
                                             {order.order_token && order.status !== 'Delivered' && (
                                                 <Link
                                                     to={`/track/${order.order_token}`}
@@ -158,3 +268,4 @@ const OrderHistory = () => {
 };
 
 export default OrderHistory;
+

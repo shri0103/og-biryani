@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Minus, Flame, Sparkles, ShoppingCart, Check, RotateCcw, Zap, X, Clock, Star, Calendar } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Search, Flame, Sparkles, ChevronRight, X, Clock, Star, Check, Calendar, RotateCcw, Zap, ImageOff } from 'lucide-react';
 import { useLang } from '../App';
 
 // ─── Combo Definitions ─────────────────────────────
@@ -26,11 +26,47 @@ const COMBO_RULES = [
     },
 ];
 
+// ─── Lazy Image with Blur Placeholder ────────────────
+function LazyImage({ src, alt }) {
+    const [loaded, setLoaded] = useState(false);
+    const [error, setError] = useState(false);
+
+    if (error) return null;
+
+    return (
+        <div className="relative -mx-6 -mt-6 mb-4 h-40 overflow-hidden rounded-t-2xl">
+            {/* Blur placeholder */}
+            <div
+                className="absolute inset-0 transition-opacity duration-500"
+                style={{
+                    background: 'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(26,26,46,0.6), rgba(184,150,42,0.1))',
+                    filter: 'blur(8px)',
+                    opacity: loaded ? 0 : 1,
+                }}
+            />
+            <img
+                src={src}
+                alt={alt}
+                loading="lazy"
+                decoding="async"
+                sizes="(max-width: 768px) 100vw, 33vw"
+                className="w-full h-full object-cover transition-opacity duration-500"
+                style={{ opacity: loaded ? 1 : 0, maxHeight: 160 }}
+                onLoad={() => setLoaded(true)}
+                onError={() => setError(true)}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-dark-900/80 via-transparent to-transparent" />
+        </div>
+    );
+}
+
 const Menu = ({ addToCart, cart = [] }) => {
     const { t } = useLang();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState('All');
+    const [searchQuery, setSearchQuery] = useState('');
     const [quantities, setQuantities] = useState({});
     const [addedItems, setAddedItems] = useState({});
     const [flyingItem, setFlyingItem] = useState(null);
@@ -39,31 +75,77 @@ const Menu = ({ addToCart, cart = [] }) => {
     const [isOrderingLocked, setIsOrderingLocked] = useState(false);
     const cartIconRef = useRef(null);
     const cardRefs = useRef({});
+    const [itemRatings, setItemRatings] = useState({});
+
+    // ─── Pull-to-Refresh ─────────────────────────────
+    const [pullDistance, setPullDistance] = useState(0);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const touchStartY = useRef(0);
+    const isPulling = useRef(false);
+
+    const handleTouchStart = useCallback((e) => {
+        if (window.scrollY === 0) {
+            touchStartY.current = e.touches[0].clientY;
+            isPulling.current = true;
+        }
+    }, []);
+
+    const handleTouchMove = useCallback((e) => {
+        if (!isPulling.current) return;
+        const diff = e.touches[0].clientY - touchStartY.current;
+        if (diff > 0 && window.scrollY === 0) {
+            setPullDistance(Math.min(diff * 0.5, 120));
+        }
+    }, []);
+
+    const handleTouchEnd = useCallback(async () => {
+        if (pullDistance > 80) {
+            setIsRefreshing(true);
+            await fetchMenu();
+            setIsRefreshing(false);
+        }
+        setPullDistance(0);
+        isPulling.current = false;
+    }, [pullDistance]);
 
     // ─── Smart Ordering Lock (after 6 PM) ───────────
     useEffect(() => {
         const checkTime = () => {
             const now = new Date();
             const h = now.getHours();
-            setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
+            // setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
+            setIsOrderingLocked(false); // TESTING: orders always open
         };
         checkTime();
         const interval = setInterval(checkTime, 30000);
         return () => clearInterval(interval);
     }, []);
 
+    const fetchMenu = async () => {
+        setLoading(true);
+        setFetchError(false);
+        try {
+            const res = await axios.get(`${import.meta.env.VITE_API_URL}/menu`);
+            setItems(res.data.data);
+        } catch (error) {
+            console.error("Error fetching menu:", error);
+            setFetchError(true);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchMenu = async () => {
-            try {
-                const res = await axios.get(`${import.meta.env.VITE_API_URL}/menu`);
-                setItems(res.data.data);
-            } catch (error) {
-                console.error("Error fetching menu:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchMenu();
+
+        // Fetch aggregated reviews per menu item
+        axios.get(`${import.meta.env.VITE_API_URL}/reviews/menu`)
+            .then(res => {
+                const map = {};
+                (res.data.data || []).forEach(r => { map[r.name] = r; });
+                setItemRatings(map);
+            })
+            .catch(() => { });
 
         // Load last order from localStorage
         const saved = localStorage.getItem('lastOrder');
@@ -74,6 +156,11 @@ const Menu = ({ addToCart, cart = [] }) => {
 
     const categories = ['All', ...new Set(items.map(item => item.category))];
     const filteredItems = (selectedCategory === 'All' ? items : items.filter(item => item.category === selectedCategory))
+        .filter(item => {
+            if (!searchQuery.trim()) return true;
+            const q = searchQuery.toLowerCase();
+            return (item.name || '').toLowerCase().includes(q) || (item.description || '').toLowerCase().includes(q);
+        })
         .sort((a, b) => {
             // Combo items always go last
             if (a.category === 'Combo' && b.category !== 'Combo') return 1;
@@ -155,6 +242,35 @@ const Menu = ({ addToCart, cart = [] }) => {
         return cartItem ? cartItem.quantity : 0;
     };
 
+    // ─── Network Error Screen ────────────────────────
+    if (fetchError && items.length === 0) {
+        return (
+            <div className="container mx-auto px-2 pb-24">
+                <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-6">
+                    <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                        className="w-20 h-20 rounded-full bg-ember-500/10 flex items-center justify-center"
+                    >
+                        <ImageOff size={36} className="text-ember-500" />
+                    </motion.div>
+                    <div className="space-y-2">
+                        <h3 className="text-2xl font-serif font-bold text-gold-200">Couldn't Load Menu</h3>
+                        <p className="text-sm text-gold-300/40">Please check your internet connection and try again.</p>
+                    </div>
+                    <button
+                        onClick={fetchMenu}
+                        className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-gold-600 to-gold-500 text-dark-900 font-bold rounded-full btn-shimmer glow-gold-strong hover:from-gold-500 hover:to-gold-400 transition-all"
+                    >
+                        <RotateCcw size={16} />
+                        Try Again
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     if (loading) {
         return (
             <div className="container mx-auto px-2 pb-24">
@@ -187,7 +303,29 @@ const Menu = ({ addToCart, cart = [] }) => {
     }
 
     return (
-        <div className="container mx-auto px-2 pb-24">
+        <div
+            className="container mx-auto px-2 pb-24"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+        >
+            {/* Pull-to-Refresh Indicator */}
+            <AnimatePresence>
+                {pullDistance > 10 && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                        className="flex justify-center py-4"
+                    >
+                        <motion.div
+                            animate={{ rotate: isRefreshing ? 360 : pullDistance * 2 }}
+                            transition={isRefreshing ? { repeat: Infinity, duration: 0.8, ease: 'linear' } : {}}
+                            className="w-8 h-8 border-2 border-gold-500/40 border-t-gold-500 rounded-full"
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {/* Page Header */}
             <div className="text-center mb-10">
                 <h2 className="text-4xl md:text-5xl font-serif font-bold text-gradient-gold">{t('ourPremiumMenu')}</h2>
@@ -281,12 +419,34 @@ const Menu = ({ addToCart, cart = [] }) => {
                 </motion.div>
             )}
 
+            {/* Search Bar */}
+            <div className="max-w-md mx-auto mb-8">
+                <div className="relative">
+                    <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-500/40" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder={t('searchMenu') || 'Search menu...'}
+                        className="w-full pl-11 pr-10 py-3 bg-dark-700/50 border border-gold-600/20 rounded-2xl text-gold-200 placeholder:text-gold-300/25 focus:outline-none focus:border-gold-500/50 transition-colors text-sm"
+                    />
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gold-300/30 hover:text-gold-300/60 transition-colors"
+                        >
+                            <X size={16} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
             {/* Category Filters */}
             <div className="flex justify-center gap-2 md:gap-4 mb-12 flex-wrap">
                 {categories.map(category => (
                     <button
                         key={category}
-                        onClick={() => setSelectedCategory(category)}
+                        onClick={() => { setSelectedCategory(category); setSearchQuery(''); }}
                         className={`relative px-5 py-2 rounded-full text-sm font-medium tracking-wide transition-all duration-300 ${selectedCategory === category
                             ? 'bg-gold-500/15 text-gold-400 border border-gold-500/40 glow-gold'
                             : 'text-gold-300/50 border border-transparent hover:text-gold-300/80 hover:border-gold-600/20'
@@ -356,9 +516,14 @@ const Menu = ({ addToCart, cart = [] }) => {
                                     </div>
                                 )}
 
+                                {/* Food Image */}
+                                {item.image ? (
+                                    <LazyImage src={item.image} alt={item.name} />
+                                ) : null}
+
                                 <div>
                                     {/* Item Name & Price */}
-                                    <div className="flex justify-between items-start mb-3 mt-1 gap-3">
+                                    <div className="flex justify-between items-start mb-1 mt-1 gap-3">
                                         <h3 className="text-xl font-serif font-bold text-gold-200 group-hover:text-gold-100 transition-colors leading-snug">
                                             {item.name}
                                         </h3>
@@ -366,6 +531,19 @@ const Menu = ({ addToCart, cart = [] }) => {
                                             ₹{item.price}
                                         </span>
                                     </div>
+
+                                    {/* Star Rating */}
+                                    {itemRatings[item.name] && (
+                                        <div className="flex items-center gap-1.5 mb-2">
+                                            <div className="flex items-center gap-0.5">
+                                                {[1, 2, 3, 4, 5].map(s => (
+                                                    <Star key={s} size={12} className={s <= Math.round(itemRatings[item.name].avgRating) ? 'text-gold-500 fill-gold-500' : 'text-gold-500/20'} />
+                                                ))}
+                                            </div>
+                                            <span className="text-[11px] text-gold-400 font-medium">{itemRatings[item.name].avgRating}</span>
+                                            <span className="text-[10px] text-gold-300/30">({itemRatings[item.name].reviewCount})</span>
+                                        </div>
+                                    )}
 
                                     <p className="text-gold-300/50 text-sm leading-relaxed mb-2">
                                         {item.description}
@@ -510,7 +688,7 @@ const Menu = ({ addToCart, cart = [] }) => {
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div>
+        </div >
     );
 };
 

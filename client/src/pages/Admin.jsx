@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogIn, RefreshCw, Package, UtensilsCrossed, Plus, Save, Trash2, Edit3, X, ChevronRight, Lock, User, BarChart3, Star, Calendar, TrendingUp, DollarSign, ShoppingBag, Bell, Search, Filter, Volume2, Tag } from 'lucide-react';
+import { LogIn, RefreshCw, Package, UtensilsCrossed, Plus, Save, Trash2, Edit3, X, ChevronRight, Lock, User, BarChart3, Star, Calendar, TrendingUp, DollarSign, ShoppingBag, Bell, Search, Filter, Volume2, Tag, Download, Clock, Users, MessageCircle, Eye, EyeOff } from 'lucide-react';
 
 // ─── Notification Sound (Web Audio API — pleasant loud chime) ────
 const playNotificationSound = async () => {
@@ -66,19 +66,29 @@ const Admin = () => {
     const isFirstFetch = useRef(true);
     const fetchOrdersRef = useRef(null);
 
+    // Auto WhatsApp notify toggle
+    const [autoWhatsApp, setAutoWhatsApp] = useState(() => localStorage.getItem('adminAutoWhatsApp') !== '0');
+
     // Order filter state
     const [filterStatus, setFilterStatus] = useState('all');
     const [filterDate, setFilterDate] = useState('today');
     const [searchQuery, setSearchQuery] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     // Coupons state
     const [coupons, setCoupons] = useState([]);
     const [couponForm, setCouponForm] = useState({ code: '', discount_percent: '', max_uses: '100' });
 
     // Menu form state
-    const [menuForm, setMenuForm] = useState({ name: '', description: '', price: '', category: 'Main Course', tag: '', available_days: '' });
+    const [menuForm, setMenuForm] = useState({ name: '', description: '', price: '', category: 'Main Course', tag: '', available_days: '', image: '' });
     const [editId, setEditId] = useState(null);
     const [showMenuForm, setShowMenuForm] = useState(false);
+
+    // Broadcast state
+    const [showBroadcastForm, setShowBroadcastForm] = useState(false);
+    const [broadcastForm, setBroadcastForm] = useState({ title: '', body: '' });
+    const [broadcasting, setBroadcasting] = useState(false);
 
     const headers = { Authorization: `Bearer ${token}` };
 
@@ -193,7 +203,7 @@ const Admin = () => {
 
     const fetchMenu = async () => {
         try {
-            const res = await axios.get(`${API}/menu`);
+            const res = await axios.get(`${API}/menu?all=1`);
             setMenuItems(res.data.data || []);
         } catch (err) {
             console.error('Error fetching menu:', err);
@@ -217,6 +227,11 @@ const Admin = () => {
         try {
             await axios.patch(`${API}/orders/${orderId}/status`, { status: newStatus }, { headers });
             setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+            // Auto-notify via WhatsApp
+            if (autoWhatsApp) {
+                const order = orders.find(o => o.id === orderId);
+                if (order) notifyViaWhatsApp({ ...order, status: newStatus });
+            }
         } catch (err) {
             console.error('Error updating status:', err);
         }
@@ -245,6 +260,16 @@ const Admin = () => {
         }
     };
 
+    // Toggle item active/disabled
+    const toggleActive = async (itemId) => {
+        try {
+            await axios.patch(`${API}/menu/${itemId}/toggle`, {}, { headers });
+            fetchMenu();
+        } catch (err) {
+            console.error('Error toggling item:', err);
+        }
+    };
+
     // Menu CRUD
     const handleMenuSubmit = async (e) => {
         e.preventDefault();
@@ -270,6 +295,7 @@ const Admin = () => {
             category: item.category,
             tag: item.tag || '',
             available_days: item.available_days || '',
+            image: item.image || '',
         });
         setEditId(item.id);
         setShowMenuForm(true);
@@ -286,15 +312,95 @@ const Admin = () => {
     };
 
     const resetMenuForm = () => {
-        setMenuForm({ name: '', description: '', price: '', category: 'Main Course', tag: '', available_days: '' });
+        setMenuForm({ name: '', description: '', price: '', category: 'Main Course', tag: '', available_days: '', image: '' });
         setEditId(null);
         setShowMenuForm(false);
+    };
+
+    const handleBroadcast = async (e) => {
+        e.preventDefault();
+        if (!broadcastForm.title || !broadcastForm.body) return;
+        setBroadcasting(true);
+        try {
+            const res = await axios.post(`${API}/push/broadcast`, broadcastForm, { headers });
+            alert(res.data.message || 'Broadcast success');
+            setBroadcastForm({ title: '', body: '' });
+            setShowBroadcastForm(false);
+        } catch (err) {
+            alert(err.response?.data?.error || 'Broadcast failed');
+        } finally {
+            setBroadcasting(false);
+        }
     };
 
     const toggleDay = (day) => {
         const days = menuForm.available_days ? menuForm.available_days.split(',').map(d => d.trim()).filter(Boolean) : [];
         const updated = days.includes(day) ? days.filter(d => d !== day) : [...days, day];
         setMenuForm(p => ({ ...p, available_days: updated.join(',') }));
+    };
+
+    // ─── Shared filter helper (used by count, list, summary, export) ───
+    const getFilteredOrders = () => {
+        let filtered = orders;
+        if (filterStatus !== 'all') filtered = filtered.filter(o => o.status === filterStatus);
+        if (filterDate === 'today') filtered = filtered.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString());
+        else if (filterDate === 'yesterday') {
+            const y = new Date(); y.setDate(y.getDate() - 1);
+            filtered = filtered.filter(o => new Date(o.created_at).toDateString() === y.toDateString());
+        }
+        else if (filterDate === 'week') { const w = Date.now() - 7 * 24 * 60 * 60 * 1000; filtered = filtered.filter(o => new Date(o.created_at).getTime() > w); }
+        else if (filterDate === 'month') {
+            const now = new Date();
+            filtered = filtered.filter(o => { const d = new Date(o.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+        }
+        else if (filterDate === 'last30') { const t = Date.now() - 30 * 24 * 60 * 60 * 1000; filtered = filtered.filter(o => new Date(o.created_at).getTime() > t); }
+        else if (filterDate === 'custom' && dateFrom) {
+            const from = new Date(dateFrom); from.setHours(0, 0, 0, 0);
+            const to = dateTo ? new Date(dateTo) : new Date(); to.setHours(23, 59, 59, 999);
+            filtered = filtered.filter(o => { const d = new Date(o.created_at); return d >= from && d <= to; });
+        }
+        if (searchQuery.trim()) { const q = searchQuery.toLowerCase(); filtered = filtered.filter(o => (o.customer_name || '').toLowerCase().includes(q) || (o.customer_phone || '').includes(q)); }
+        return filtered;
+    };
+
+    // ─── CSV Export ───
+    const exportCSV = () => {
+        const filtered = getFilteredOrders();
+        if (filtered.length === 0) return;
+        const header = 'Order ID,Date,Customer Name,Phone,Items,Total (₹),Status,Token';
+        const rows = filtered.map(o => {
+            let items = '';
+            try { items = JSON.parse(o.items).map(i => `${i.quantity || 1}x ${i.name}`).join(' | '); } catch { items = o.items; }
+            const date = o.created_at ? new Date(o.created_at).toLocaleString('en-IN') : '';
+            return `${o.id},"${date}","${(o.customer_name || '').replace(/"/g, '""')}","${o.customer_phone || ''}","${items.replace(/"/g, '""')}",${o.total_amount || o.total},${o.status},${o.order_token || ''}`;
+        });
+        const csv = [header, ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `og-biryani-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // ─── WhatsApp Status Notification ───
+    const notifyViaWhatsApp = (order) => {
+        if (!order.customer_phone) return;
+        const phone = order.customer_phone.replace(/\D/g, '');
+        const phoneNum = phone.startsWith('91') ? phone : `91${phone}`;
+        const name = order.customer_name || 'Customer';
+        const status = order.status || 'Received';
+
+        const messages = {
+            Received: `🙏 Hi ${name}!\n\nYour order #${order.id} has been *received* at OG Biriyani! ✅\n\nWe'll start preparing it soon. Thank you for ordering! 🍛`,
+            Preparing: `👨‍🍳 Hi ${name}!\n\nGreat news! Your order #${order.id} is now being *prepared*! 🔥\n\nOur chefs are cooking your delicious biriyani fresh. Stay tuned! 🍛`,
+            Ready: `✅ Hi ${name}!\n\nYour order #${order.id} is *READY for pickup/delivery*! 🎉\n\nToken: ${order.order_token || 'N/A'}\nTotal: ₹${order.total_amount || order.total}\n\nThank you for choosing OG Biriyani! 🍛`,
+            Delivered: `🎉 Hi ${name}!\n\nYour order #${order.id} has been *delivered*! 🚀\n\nWe hope you enjoy your meal! 😋\nThank you for choosing OG Biriyani! ⭐\n\nOrder again: ogbiriyani.com`,
+        };
+
+        const msg = messages[status] || `Hi ${name}, your order #${order.id} status: ${status}`;
+        window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(msg)}`, '_blank');
     };
 
     // ─── Login Screen ───────────────────────────────────
@@ -399,6 +505,13 @@ const Admin = () => {
                         Test 🔔
                     </button>
                     <button
+                        onClick={() => { const next = !autoWhatsApp; setAutoWhatsApp(next); localStorage.setItem('adminAutoWhatsApp', next ? '1' : '0'); }}
+                        title={autoWhatsApp ? 'Auto WhatsApp ON — click to disable' : 'Auto WhatsApp OFF — click to enable'}
+                        className={`p-2 rounded-xl transition-all ${autoWhatsApp ? 'text-green-400 glass-card-light' : 'text-gold-300/30 border border-transparent hover:border-gold-600/20'}`}
+                    >
+                        <MessageCircle size={16} />
+                    </button>
+                    <button
                         onClick={() => { fetchOrders(); fetchMenu(); fetchStats(); }}
                         className="px-4 py-2 glass-card-light text-gold-400 hover:text-gold-300 text-sm font-medium flex items-center gap-2 rounded-xl"
                     >
@@ -474,7 +587,7 @@ const Admin = () => {
                     {stats ? (
                         <>
                             {/* Stat Cards */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                 <div className="glass-card p-5 text-center">
                                     <ShoppingBag size={24} className="text-blue-400 mx-auto mb-2" />
                                     <p className="text-2xl font-bold text-gold-200">{stats.today?.total_orders || 0}</p>
@@ -484,6 +597,11 @@ const Admin = () => {
                                     <DollarSign size={24} className="text-green-400 mx-auto mb-2" />
                                     <p className="text-2xl font-bold text-gradient-gold">₹{stats.today?.total_revenue || 0}</p>
                                     <p className="text-xs text-gold-300/40 mt-1">Today's Revenue</p>
+                                </div>
+                                <div className="glass-card p-5 text-center">
+                                    <BarChart3 size={24} className="text-purple-400 mx-auto mb-2" />
+                                    <p className="text-2xl font-bold text-gold-200">₹{stats.today?.avg_order || 0}</p>
+                                    <p className="text-xs text-gold-300/40 mt-1">Avg Order Value</p>
                                 </div>
                                 <div className="glass-card p-5 text-center">
                                     <TrendingUp size={24} className="text-amber-400 mx-auto mb-2" />
@@ -533,60 +651,158 @@ const Admin = () => {
                                     )}
                                 </div>
 
-                                {/* Status Breakdown */}
+                                {/* Status Breakdown — Pie Chart */}
                                 <div className="glass-card p-5">
                                     <h4 className="font-serif font-bold text-gold-300 mb-4 flex items-center gap-2">
                                         <Package size={16} className="text-gold-500" /> Today's Status
                                     </h4>
-                                    {stats.statusBreakdown?.length > 0 ? (
-                                        <div className="space-y-3">
-                                            {stats.statusBreakdown.map(s => {
-                                                const style = STATUS_COLORS[s.status] || STATUS_COLORS.Received;
-                                                return (
-                                                    <div key={s.status} className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`w-2 h-2 rounded-full ${style.dot}`} />
-                                                            <span className={`text-sm ${style.text}`}>{s.status}</span>
+                                    {stats.statusBreakdown?.length > 0 ? (() => {
+                                        const totalOrders = stats.statusBreakdown.reduce((s, x) => s + x.count, 0);
+                                        const pieColors = { Received: '#60A5FA', Preparing: '#FBBF24', Ready: '#34D399', Delivered: '#C084FC', Cancelled: '#F87171' };
+                                        let cumPct = 0;
+                                        const segments = stats.statusBreakdown.map(s => {
+                                            const pct = (s.count / totalOrders) * 100;
+                                            const start = cumPct;
+                                            cumPct += pct;
+                                            return { ...s, pct, start, color: pieColors[s.status] || '#D4A843' };
+                                        });
+                                        const gradientStr = segments.map(s => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');
+                                        return (
+                                            <div className="flex items-center gap-6">
+                                                <div
+                                                    className="w-24 h-24 rounded-full shrink-0"
+                                                    style={{ background: `conic-gradient(${gradientStr})` }}
+                                                />
+                                                <div className="space-y-2 flex-1">
+                                                    {segments.map(s => (
+                                                        <div key={s.status} className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+                                                                <span className="text-sm text-gold-200">{s.status}</span>
+                                                            </div>
+                                                            <span className="text-gold-400 font-bold text-sm">{s.count} <span className="text-gold-300/30 font-normal text-xs">({Math.round(s.pct)}%)</span></span>
                                                         </div>
-                                                        <span className="text-gold-200 font-bold">{s.count}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })() : (
+                                        <p className="text-gold-300/30 text-sm">No orders today</p>
+                                    )}
+                                </div>
+
+                                {/* Top Customers */}
+                                <div className="glass-card p-5">
+                                    <h4 className="font-serif font-bold text-gold-300 mb-4 flex items-center gap-2">
+                                        <Users size={16} className="text-gold-500" /> Top Repeat Customers
+                                    </h4>
+                                    {stats.repeatCustomers?.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {stats.repeatCustomers.map((c, i) => (
+                                                <div key={c.customer_phone} className="flex items-center gap-3">
+                                                    <span className="text-xs text-gold-300/40 w-4 font-mono">#{i + 1}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm text-gold-200 truncate">{c.customer_name || 'Guest'}</p>
+                                                        <p className="text-[10px] text-gold-300/30">{c.customer_phone}</p>
                                                     </div>
-                                                );
-                                            })}
+                                                    <div className="text-right shrink-0">
+                                                        <p className="text-sm font-bold text-gold-400">{c.order_count} orders</p>
+                                                        <p className="text-[10px] text-gold-300/40">₹{c.total_spent}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     ) : (
-                                        <p className="text-gold-300/30 text-sm">No orders today</p>
+                                        <p className="text-gold-300/30 text-sm">No repeat customers yet</p>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Weekly Trend */}
-                            {stats.weekly?.length > 0 && (
+                            {/* Orders Trend SVG Line Chart + Review Stats */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {/* SVG Orders Trend Line */}
+                                {stats.weekly?.length > 1 && (
+                                    <div className="glass-card p-5 md:col-span-2">
+                                        <h4 className="font-serif font-bold text-gold-300 mb-4 flex items-center gap-2">
+                                            <TrendingUp size={16} className="text-gold-500" /> Orders Trend
+                                        </h4>
+                                        <div className="relative" style={{ height: 120 }}>
+                                            <svg viewBox="0 0 300 100" className="w-full h-full" preserveAspectRatio="none">
+                                                {/* Grid lines */}
+                                                {[0, 25, 50, 75, 100].map(y => (
+                                                    <line key={y} x1="0" y1={y} x2="300" y2={y} stroke="rgba(212,168,67,0.06)" strokeWidth="0.5" />
+                                                ))}
+                                                {(() => {
+                                                    const maxOrders = Math.max(...stats.weekly.map(d => d.orders), 1);
+                                                    const points = stats.weekly.map((d, i) => {
+                                                        const x = (i / (stats.weekly.length - 1)) * 280 + 10;
+                                                        const y = 95 - (d.orders / maxOrders) * 85;
+                                                        return `${x},${y}`;
+                                                    });
+                                                    const areaPoints = [...points, `290,95`, `10,95`];
+                                                    return (
+                                                        <>
+                                                            {/* Area fill */}
+                                                            <polygon points={areaPoints.join(' ')} fill="url(#goldGradient)" />
+                                                            {/* Line */}
+                                                            <polyline points={points.join(' ')} fill="none" stroke="#D4A843" strokeWidth="2" strokeLinejoin="round" />
+                                                            {/* Dots */}
+                                                            {stats.weekly.map((d, i) => {
+                                                                const x = (i / (stats.weekly.length - 1)) * 280 + 10;
+                                                                const y = 95 - (d.orders / maxOrders) * 85;
+                                                                return <circle key={i} cx={x} cy={y} r="3" fill="#1a1a2e" stroke="#D4A843" strokeWidth="1.5" />;
+                                                            })}
+                                                            <defs>
+                                                                <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="0%" stopColor="#D4A843" stopOpacity="0.3" />
+                                                                    <stop offset="100%" stopColor="#D4A843" stopOpacity="0" />
+                                                                </linearGradient>
+                                                            </defs>
+                                                        </>
+                                                    );
+                                                })()}
+                                            </svg>
+                                            {/* X-axis labels */}
+                                            <div className="flex justify-between px-2 mt-1">
+                                                {stats.weekly.map(d => (
+                                                    <span key={d.day} className="text-[9px] text-gold-300/30">{new Date(d.day).toLocaleDateString('en-IN', { weekday: 'short' })}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Review Stats Card */}
                                 <div className="glass-card p-5">
                                     <h4 className="font-serif font-bold text-gold-300 mb-4 flex items-center gap-2">
-                                        <TrendingUp size={16} className="text-gold-500" /> Last 7 Days
+                                        <Star size={16} className="text-gold-500" /> Reviews
                                     </h4>
-                                    <div className="flex items-end gap-2 h-32">
-                                        {stats.weekly.map(day => {
-                                            const maxRev = Math.max(...stats.weekly.map(d => d.revenue));
-                                            const height = maxRev > 0 ? (day.revenue / maxRev) * 100 : 0;
-                                            return (
-                                                <div key={day.day} className="flex-1 flex flex-col items-center gap-1">
-                                                    <span className="text-[10px] text-gold-400 font-mono">₹{day.revenue}</span>
-                                                    <motion.div
-                                                        initial={{ height: 0 }}
-                                                        animate={{ height: `${Math.max(height, 4)}%` }}
-                                                        className="w-full bg-gradient-to-t from-gold-600 to-gold-400 rounded-t-md"
-                                                        style={{ minHeight: '4px' }}
-                                                    />
-                                                    <span className="text-[9px] text-gold-300/40">
-                                                        {new Date(day.day).toLocaleDateString('en-IN', { weekday: 'short' })}
-                                                    </span>
+                                    {stats.reviews ? (
+                                        <div className="text-center space-y-3">
+                                            <div>
+                                                <p className="text-4xl font-bold text-gradient-gold">{stats.reviews.avgRating || '—'}</p>
+                                                <div className="flex justify-center gap-0.5 mt-1">
+                                                    {[1, 2, 3, 4, 5].map(s => (
+                                                        <Star key={s} size={14} className={s <= Math.round(stats.reviews.avgRating) ? 'text-gold-400 fill-gold-400' : 'text-dark-500'} />
+                                                    ))}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
+                                                <p className="text-xs text-gold-300/40 mt-1">{stats.reviews.reviewCount} total reviews</p>
+                                            </div>
+                                            {stats.monthly?.length > 0 && (
+                                                <div className="pt-3 border-t border-gold-600/10">
+                                                    <p className="text-xs text-gold-300/40 mb-1">Monthly Revenue</p>
+                                                    <p className="text-xl font-bold text-gradient-gold">
+                                                        ₹{stats.monthly.reduce((s, w) => s + w.revenue, 0).toLocaleString()}
+                                                    </p>
+                                                    <p className="text-[10px] text-gold-300/30">{stats.monthly.reduce((s, w) => s + w.orders, 0)} orders (30 days)</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-gold-300/30 text-sm">No reviews yet</p>
+                                    )}
                                 </div>
-                            )}
+                            </div>
                         </>
                     ) : (
                         <div className="glass-card p-12 text-center">
@@ -652,55 +868,106 @@ const Admin = () => {
                     })()}
 
                     {/* Filter Controls */}
-                    <div className="glass-card-light p-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                        {/* Status Filter */}
-                        <div className="flex items-center gap-2">
-                            <Filter size={14} className="text-gold-300/40 shrink-0" />
-                            <select
-                                value={filterStatus}
-                                onChange={e => setFilterStatus(e.target.value)}
-                                className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40"
+                    <div className="glass-card-light p-4 space-y-3">
+                        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                            {/* Status Filter */}
+                            <div className="flex items-center gap-2">
+                                <Filter size={14} className="text-gold-300/40 shrink-0" />
+                                <select
+                                    value={filterStatus}
+                                    onChange={e => setFilterStatus(e.target.value)}
+                                    className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40"
+                                >
+                                    <option value="all">All Status</option>
+                                    {STATUS_FLOW.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                            </div>
+                            {/* Date Filter */}
+                            <div className="flex items-center gap-2">
+                                <Calendar size={14} className="text-gold-300/40 shrink-0" />
+                                <select
+                                    value={filterDate}
+                                    onChange={e => setFilterDate(e.target.value)}
+                                    className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40"
+                                >
+                                    <option value="today">Today</option>
+                                    <option value="yesterday">Yesterday</option>
+                                    <option value="week">Last 7 Days</option>
+                                    <option value="last30">Last 30 Days</option>
+                                    <option value="month">This Month</option>
+                                    <option value="all">All Time</option>
+                                    <option value="custom">Custom Range</option>
+                                </select>
+                            </div>
+                            {/* Search */}
+                            <div className="flex-1 relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gold-300/30" />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder="Search by name or phone..."
+                                    className="w-full bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs pl-9 pr-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40 placeholder:text-gold-300/20"
+                                />
+                            </div>
+                            {/* Export CSV */}
+                            <button
+                                onClick={exportCSV}
+                                disabled={getFilteredOrders().length === 0}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-green-accent/10 text-green-accent border border-green-accent/30 hover:bg-green-accent/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                             >
-                                <option value="all">All Status</option>
-                                {STATUS_FLOW.map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
+                                <Download size={14} />
+                                Export CSV
+                            </button>
+                            {/* Results count */}
+                            <span className="text-[10px] text-gold-300/30 shrink-0 self-center">
+                                {getFilteredOrders().length} orders
+                            </span>
                         </div>
-                        {/* Date Filter */}
-                        <div className="flex items-center gap-2">
-                            <Calendar size={14} className="text-gold-300/40 shrink-0" />
-                            <select
-                                value={filterDate}
-                                onChange={e => setFilterDate(e.target.value)}
-                                className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40"
-                            >
-                                <option value="today">Today</option>
-                                <option value="week">This Week</option>
-                                <option value="all">All Time</option>
-                            </select>
-                        </div>
-                        {/* Search */}
-                        <div className="flex-1 relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gold-300/30" />
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                placeholder="Search by name or phone..."
-                                className="w-full bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs pl-9 pr-3 py-2 rounded-lg focus:outline-none focus:border-gold-500/40 placeholder:text-gold-300/20"
-                            />
-                        </div>
-                        {/* Results count */}
-                        <span className="text-[10px] text-gold-300/30 shrink-0 self-center">
-                            {(() => {
-                                let filtered = orders;
-                                if (filterStatus !== 'all') filtered = filtered.filter(o => o.status === filterStatus);
-                                if (filterDate === 'today') filtered = filtered.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString());
-                                else if (filterDate === 'week') { const w = Date.now() - 7 * 24 * 60 * 60 * 1000; filtered = filtered.filter(o => new Date(o.created_at).getTime() > w); }
-                                if (searchQuery.trim()) { const q = searchQuery.toLowerCase(); filtered = filtered.filter(o => (o.customer_name || '').toLowerCase().includes(q) || (o.customer_phone || '').includes(q)); }
-                                return `${filtered.length} orders`;
-                            })()}
-                        </span>
+                        {/* Custom Date Range Picker */}
+                        {filterDate === 'custom' && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] text-gold-300/40 uppercase tracking-wider">From</span>
+                                <input
+                                    type="date"
+                                    value={dateFrom}
+                                    onChange={e => setDateFrom(e.target.value)}
+                                    className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-gold-500/40"
+                                />
+                                <span className="text-[10px] text-gold-300/40 uppercase tracking-wider">To</span>
+                                <input
+                                    type="date"
+                                    value={dateTo}
+                                    onChange={e => setDateTo(e.target.value)}
+                                    className="bg-dark-700/60 border border-gold-600/20 text-gold-300 text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-gold-500/40"
+                                />
+                            </div>
+                        )}
                     </div>
+
+                    {/* Filtered Summary Card */}
+                    {(() => {
+                        const filtered = getFilteredOrders();
+                        if (filtered.length === 0) return null;
+                        const totalRevenue = filtered.reduce((s, o) => s + (o.total_amount || o.total || 0), 0);
+                        const avgOrder = Math.round(totalRevenue / filtered.length);
+                        return (
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="glass-card p-3 text-center">
+                                    <p className="text-lg font-bold text-gold-200">{filtered.length}</p>
+                                    <p className="text-[10px] text-gold-300/40">Orders</p>
+                                </div>
+                                <div className="glass-card p-3 text-center">
+                                    <p className="text-lg font-bold text-gradient-gold">₹{totalRevenue}</p>
+                                    <p className="text-[10px] text-gold-300/40">Revenue</p>
+                                </div>
+                                <div className="glass-card p-3 text-center">
+                                    <p className="text-lg font-bold text-gold-200">₹{avgOrder}</p>
+                                    <p className="text-[10px] text-gold-300/40">Avg Order</p>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {orders.length === 0 ? (
                         <div className="glass-card p-12 text-center">
@@ -708,12 +975,8 @@ const Admin = () => {
                             <p className="text-gold-300/40 font-light">No orders yet</p>
                         </div>
                     ) : (() => {
-                        // Apply filters
-                        let filtered = orders;
-                        if (filterStatus !== 'all') filtered = filtered.filter(o => o.status === filterStatus);
-                        if (filterDate === 'today') filtered = filtered.filter(o => new Date(o.created_at).toDateString() === new Date().toDateString());
-                        else if (filterDate === 'week') { const w = Date.now() - 7 * 24 * 60 * 60 * 1000; filtered = filtered.filter(o => new Date(o.created_at).getTime() > w); }
-                        if (searchQuery.trim()) { const q = searchQuery.toLowerCase(); filtered = filtered.filter(o => (o.customer_name || '').toLowerCase().includes(q) || (o.customer_phone || '').includes(q)); }
+                        // Apply filters using shared helper
+                        const filtered = getFilteredOrders();
 
                         if (filtered.length === 0) return (
                             <div className="glass-card p-8 text-center">
@@ -757,6 +1020,12 @@ const Admin = () => {
                                             <span className="text-gold-400 font-bold">₹{order.total_amount || order.total}</span>
                                             {order.order_token && (
                                                 <span className="text-[10px] text-gold-300/30 font-mono bg-dark-600/50 px-2 py-0.5 rounded">{order.order_token}</span>
+                                            )}
+                                            {order.scheduled_date && (
+                                                <span className="text-[10px] text-gold-400 bg-gold-500/10 px-2 py-0.5 rounded border border-gold-500/20">
+                                                    📅 {new Date(order.scheduled_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                                    {order.scheduled_time ? ` ${order.scheduled_time}` : ''}
+                                                </span>
                                             )}
                                             <span className="text-xs text-gold-300/30">
                                                 {order.created_at ? new Date(order.created_at).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) : ''}
@@ -804,6 +1073,16 @@ const Admin = () => {
                                                 → {STATUS_FLOW[currentIdx + 1]}
                                             </button>
                                         )}
+                                        {order.customer_phone && (
+                                            <button
+                                                onClick={() => notifyViaWhatsApp(order)}
+                                                title="Notify customer via WhatsApp"
+                                                className={`${canAdvance ? '' : 'ml-auto'} px-3 py-1.5 bg-green-600/15 text-green-400 border border-green-500/30 text-xs font-semibold rounded-full hover:bg-green-600/25 transition-all flex items-center gap-1.5`}
+                                            >
+                                                <MessageCircle size={12} />
+                                                WhatsApp
+                                            </button>
+                                        )}
                                     </div>
                                 </motion.div>
                             );
@@ -819,6 +1098,69 @@ const Admin = () => {
                     animate={{ opacity: 1 }}
                     className="space-y-4"
                 >
+                    {/* Broadcast Announcement Button */}
+                    <button
+                        onClick={() => setShowBroadcastForm(!showBroadcastForm)}
+                        className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-300 hover:from-purple-600/30 hover:to-pink-600/30 border border-purple-500/30 transition-all text-sm font-semibold flex items-center justify-center gap-2"
+                    >
+                        <Volume2 size={18} className="text-pink-400" />
+                        Send Broadcast Push Notification
+                    </button>
+
+                    <AnimatePresence>
+                        {showBroadcastForm && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <form onSubmit={handleBroadcast} className="glass-card p-5 space-y-4 border-purple-500/30 relative">
+                                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500 opacity-50"></div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 className="font-serif font-bold text-purple-300 flex items-center gap-2">
+                                            <Volume2 size={16} /> Broadcast Message
+                                        </h4>
+                                        <button type="button" onClick={() => setShowBroadcastForm(false)} className="text-purple-300/40 hover:text-purple-300">
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-xs text-purple-300/50 uppercase tracking-wider block mb-1">Notification Title</label>
+                                        <input
+                                            type="text"
+                                            value={broadcastForm.title}
+                                            onChange={e => setBroadcastForm(p => ({ ...p, title: e.target.value }))}
+                                            className="w-full px-4 py-2 bg-dark-700/50 border border-purple-600/20 rounded-lg text-purple-200 placeholder:text-purple-300/25 focus:outline-none focus:border-purple-500/50 text-sm"
+                                            placeholder="e.g. New Item Added!"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-purple-300/50 uppercase tracking-wider block mb-1">Notification Body</label>
+                                        <textarea
+                                            value={broadcastForm.body}
+                                            onChange={e => setBroadcastForm(p => ({ ...p, body: e.target.value }))}
+                                            className="w-full px-4 py-2 bg-dark-700/50 border border-purple-600/20 rounded-lg text-purple-200 placeholder:text-purple-300/25 focus:outline-none focus:border-purple-500/50 text-sm resize-none"
+                                            rows="2"
+                                            placeholder="e.g. We just added Mutton Biriyani to the menu. Order now!"
+                                            required
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={broadcasting}
+                                        className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 text-white font-bold rounded-xl flex justify-center items-center gap-2 hover:from-purple-500 hover:to-pink-400 transition-all text-sm disabled:opacity-50"
+                                    >
+                                        {broadcasting ? 'Sending...' : 'Send to All Users'}
+                                    </button>
+                                </form>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
                     {/* Add Button */}
                     <button
                         onClick={() => { resetMenuForm(); setShowMenuForm(true); }}
@@ -938,6 +1280,23 @@ const Admin = () => {
                                         </div>
                                     </div>
 
+                                    {/* Image URL */}
+                                    <div>
+                                        <label className="text-xs text-gold-300/50 uppercase tracking-wider block mb-1">Image URL (optional)</label>
+                                        <input
+                                            type="url"
+                                            value={menuForm.image}
+                                            onChange={e => setMenuForm(p => ({ ...p, image: e.target.value }))}
+                                            className="w-full px-4 py-2.5 bg-dark-700/50 border border-gold-600/20 rounded-lg text-gold-200 placeholder:text-gold-300/25 focus:outline-none focus:border-gold-500/50 text-sm"
+                                            placeholder="https://example.com/photo.jpg"
+                                        />
+                                        {menuForm.image && (
+                                            <div className="mt-2 w-20 h-14 rounded-lg overflow-hidden border border-gold-600/20">
+                                                <img src={menuForm.image} alt="Preview" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />
+                                            </div>
+                                        )}
+                                    </div>
+
                                     <button
                                         type="submit"
                                         className="w-full py-2.5 bg-gradient-to-r from-gold-600 to-gold-500 text-dark-900 font-bold rounded-xl flex justify-center items-center gap-2 btn-shimmer hover:from-gold-500 hover:to-gold-400 transition-all text-sm"
@@ -955,7 +1314,8 @@ const Admin = () => {
                         <motion.div
                             key={item.id}
                             layout
-                            className="glass-card p-4 flex items-center justify-between gap-4"
+                            className={`glass-card p-4 flex items-center justify-between gap-4 transition-opacity ${item.is_active === 0 ? 'opacity-40' : ''
+                                }`}
                         >
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-0.5 flex-wrap">
@@ -984,6 +1344,16 @@ const Admin = () => {
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                                 <span className="text-gold-400 font-bold text-sm mr-1">₹{item.price}</span>
+                                <button
+                                    onClick={() => toggleActive(item.id)}
+                                    title={item.is_active === 0 ? 'Enable item' : 'Disable item'}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${item.is_active === 0
+                                        ? 'text-red-400/60 hover:text-red-400 hover:bg-red-500/10'
+                                        : 'text-green-400/60 hover:text-green-400 hover:bg-green-500/10'
+                                        }`}
+                                >
+                                    {item.is_active === 0 ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
                                 <button
                                     onClick={() => toggleSpecial(item.id)}
                                     title="Set as Today's Special"

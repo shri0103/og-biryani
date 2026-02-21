@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Package, ChefHat, CheckCircle, Truck, Clock, ArrowLeft, Share2, Copy, Star, Send, MessageSquare } from 'lucide-react';
+import { Package, ChefHat, CheckCircle, Truck, Clock, ArrowLeft, Share2, Copy, Star, Send, MessageSquare, Bell, Download } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { useLang } from '../App';
+
+const API = import.meta.env.VITE_API_URL;
 
 const STATUSES = ['Received', 'Preparing', 'Ready', 'Delivered'];
 
@@ -171,10 +174,11 @@ const OrderTrack = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [copied, setCopied] = useState(false);
+    const [pushStatus, setPushStatus] = useState('idle'); // idle, subscribed, denied, unsupported
 
     const fetchOrder = async () => {
         try {
-            const res = await axios.get(`${import.meta.env.VITE_API_URL}/orders/track/${token}`);
+            const res = await axios.get(`${API}/orders/track/${token}`);
             setOrder(res.data.data);
             setError(null);
         } catch (err) {
@@ -184,11 +188,87 @@ const OrderTrack = () => {
         }
     };
 
+    // Subscribe to push notifications for this order
+    const subscribeToPush = async () => {
+        try {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                setPushStatus('unsupported');
+                return;
+            }
+
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                setPushStatus('denied');
+                return;
+            }
+
+            const reg = await navigator.serviceWorker.ready;
+
+            // Get VAPID public key from server
+            const vapidRes = await axios.get(`${API}/push/vapid-key`);
+            const vapidKey = vapidRes.data.publicKey;
+            console.log('Push: Received VAPID Key:', vapidKey);
+
+            if (!vapidKey) {
+                console.error('Push: No VAPID key received');
+                return;
+            }
+
+            // Check existing subscription
+            const existingSub = await reg.pushManager.getSubscription();
+            if (existingSub) {
+                // If it exists, unsubscribe first to ensure we use the correct key
+                console.log('Push: Unsubscribing existing subscription...');
+                await existingSub.unsubscribe();
+            }
+
+            // Convert VAPID key to Uint8Array
+            const padding = '='.repeat((4 - (vapidKey.length % 4)) % 4);
+            const base64 = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const raw = atob(base64);
+            const applicationServerKey = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) applicationServerKey[i] = raw.charCodeAt(i);
+
+            console.log('Push: Converted Key (first 10 bytes):', applicationServerKey.slice(0, 10));
+
+            const subscription = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey,
+            });
+
+            console.log('Push: Subscription successful:', subscription);
+
+            // Send subscription to server with order token
+            await axios.post(`${API}/push/subscribe`, {
+                subscription: subscription.toJSON(),
+                orderToken: token,
+            });
+
+            setPushStatus('subscribed');
+        } catch (err) {
+            console.error('Push subscription failed:', err);
+            // Check for specific error types
+            if (err.name === 'AbortError') {
+                console.error('Push: AbortError - likely VAPID key mismatch or invalid format.');
+                // Try one more time with a hard unregister if possible?
+                // For now, just log it.
+            }
+            setPushStatus('denied');
+        }
+    };
+
     useEffect(() => {
         fetchOrder();
-        const interval = setInterval(fetchOrder, 10000); // Poll every 10s
+        const interval = setInterval(fetchOrder, 10000);
         return () => clearInterval(interval);
     }, [token]);
+
+    // Auto-subscribe to push after order loads
+    useEffect(() => {
+        if (order && order.status !== 'Delivered' && pushStatus === 'idle') {
+            subscribeToPush();
+        }
+    }, [order]);
 
     const handleCopyLink = () => {
         navigator.clipboard.writeText(window.location.href);
@@ -199,6 +279,80 @@ const OrderTrack = () => {
     const handleShareWhatsApp = () => {
         const msg = `Track my OG Biriyani order: ${window.location.href}`;
         window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    const handleDownloadReceipt = () => {
+        if (!order) return;
+        try {
+            const doc = new jsPDF({ unit: 'mm', format: [80, 200] });
+            const w = 80;
+            let y = 10;
+            const items = (() => { try { return JSON.parse(order.items); } catch { return []; } })();
+
+            doc.setFillColor(26, 26, 46);
+            doc.rect(0, 0, w, 200, 'F');
+            doc.setTextColor(212, 175, 55);
+            doc.setFontSize(16);
+            doc.setFont('helvetica', 'bold');
+            doc.text('OG BIRIYANI', w / 2, y, { align: 'center' });
+            y += 5;
+            doc.setFontSize(7);
+            doc.setTextColor(180, 160, 100);
+            doc.text('Homemade Food \u00b7 Prepared Daily Fresh', w / 2, y, { align: 'center' });
+            y += 4;
+            doc.setDrawColor(212, 175, 55);
+            doc.setLineWidth(0.3);
+            doc.line(8, y, w - 8, y);
+            y += 5;
+
+            doc.setFontSize(8);
+            doc.setTextColor(200, 180, 120);
+            doc.text(`Order #${order.order_token}`, w / 2, y, { align: 'center' });
+            y += 4;
+            doc.setFontSize(7);
+            doc.setTextColor(160, 140, 90);
+            doc.text(new Date(order.created_at).toLocaleDateString('en-IN'), w / 2, y, { align: 'center' });
+            y += 6;
+
+            doc.setDrawColor(100, 90, 60);
+            doc.setLineWidth(0.15);
+            doc.line(8, y, w - 8, y);
+            y += 4;
+            doc.setFontSize(8);
+            items.forEach(item => {
+                doc.setTextColor(220, 200, 150);
+                doc.text(`${item.quantity}\u00d7 ${item.name}`, 8, y);
+                doc.setTextColor(212, 175, 55);
+                doc.text(`\u20b9${item.price * item.quantity}`, w - 8, y, { align: 'right' });
+                y += 5;
+            });
+
+            y += 1;
+            doc.line(8, y, w - 8, y);
+            y += 5;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(212, 175, 55);
+            doc.text('Total', 8, y);
+            doc.text(`\u20b9${order.total_amount}`, w - 8, y, { align: 'right' });
+            y += 7;
+
+            doc.line(8, y, w - 8, y);
+            y += 4;
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(160, 140, 90);
+            doc.text(`Name: ${order.customer_name}`, 8, y); y += 4;
+            doc.text(`Status: ${order.status}`, 8, y); y += 6;
+
+            doc.setTextColor(130, 120, 80);
+            doc.setFontSize(6);
+            doc.text('Thank you for ordering with OG Biryani \u2764', w / 2, y, { align: 'center' });
+
+            doc.save(`OG-Biryani-Receipt-${order.order_token}.pdf`);
+        } catch (err) {
+            console.error('Receipt download failed:', err);
+        }
     };
 
     if (loading) {
@@ -237,6 +391,26 @@ const OrderTrack = () => {
                     <span className="text-gold-500/40">✦</span>
                 </div>
                 <p className="text-gold-300/40 text-xs mt-3 font-mono">#{order.order_token}</p>
+                {order.scheduled_date && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-gold-500/10 border border-gold-500/20 rounded-full text-gold-400 text-xs">
+                        <span>📅</span>
+                        <span>Scheduled: {new Date(order.scheduled_date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}</span>
+                        {order.scheduled_time && <span>at {order.scheduled_time}</span>}
+                    </div>
+                )}
+                {pushStatus === 'subscribed' && (
+                    <p className="text-[10px] text-green-400/60 mt-1 flex items-center justify-center gap-1">
+                        <Bell size={10} /> Notifications enabled
+                    </p>
+                )}
+                {pushStatus === 'denied' && (
+                    <button
+                        onClick={subscribeToPush}
+                        className="text-[10px] text-gold-300/30 mt-1 flex items-center justify-center gap-1 hover:text-gold-300/50 transition-colors"
+                    >
+                        <Bell size={10} /> Enable notifications
+                    </button>
+                )}
             </div>
 
             {/* Estimated Delivery Countdown */}
@@ -244,6 +418,19 @@ const OrderTrack = () => {
 
             {/* Status Stepper */}
             <div className="glass-card p-6 mb-6">
+                {/* Animated Progress Bar */}
+                <div className="relative h-2 rounded-full bg-dark-600 mb-6 overflow-hidden">
+                    <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(currentIndex / (STATUSES.length - 1)) * 100}%` }}
+                        transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute inset-y-0 left-0 rounded-full"
+                        style={{
+                            background: 'linear-gradient(90deg, #3B82F6, #F59E0B, #22C55E, #D4AF37)',
+                            boxShadow: '0 0 12px rgba(212,175,55,0.4)',
+                        }}
+                    />
+                </div>
                 <div className="space-y-0">
                     {STATUSES.map((status, index) => {
                         const config = STATUS_CONFIG[status];
@@ -325,14 +512,14 @@ const OrderTrack = () => {
                 </div>
             )}
 
-            {/* Share Buttons */}
+            {/* Share & Download Buttons */}
             <div className="flex gap-3 mb-6">
                 <button
                     onClick={handleShareWhatsApp}
                     className="flex-1 py-3 glass-card-light flex items-center justify-center gap-2 text-sm text-green-400 hover:bg-green-400/10 transition-colors"
                 >
                     <Share2 size={16} />
-                    Share on WhatsApp
+                    Share
                 </button>
                 <button
                     onClick={handleCopyLink}
@@ -340,6 +527,13 @@ const OrderTrack = () => {
                 >
                     <Copy size={16} />
                     {copied ? 'Copied!' : 'Copy Link'}
+                </button>
+                <button
+                    onClick={handleDownloadReceipt}
+                    className="flex-1 py-3 glass-card-light flex items-center justify-center gap-2 text-sm text-amber-400 hover:bg-amber-400/10 transition-colors"
+                >
+                    <Download size={16} />
+                    Receipt
                 </button>
             </div>
 

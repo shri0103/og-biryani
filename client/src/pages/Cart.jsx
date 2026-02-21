@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, Phone, CheckCircle, Plus, Minus, ShoppingBag, Clock, Download, Award, Share2, Navigation, Tag } from 'lucide-react';
+import { Trash2, Phone, CheckCircle, Plus, Minus, ShoppingBag, Clock, Download, Share2, Navigation, Tag, CalendarClock, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
-import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { useLang } from '../App';
 
 const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 }) => {
@@ -25,12 +25,28 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
     const [couponApplied, setCouponApplied] = useState(null);
     const [couponError, setCouponError] = useState('');
     const [applyingCoupon, setApplyingCoupon] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+
+    // Schedule / Pre-order state
+    const [isScheduled, setIsScheduled] = useState(false);
+    const [scheduledDate, setScheduledDate] = useState('');
+    const [scheduledTime, setScheduledTime] = useState('');
+
+    // Helper: get tomorrow's date as YYYY-MM-DD
+    const getTomorrow = () => {
+        const d = new Date(); d.setDate(d.getDate() + 1);
+        return d.toISOString().split('T')[0];
+    };
+    const getMaxDate = () => {
+        const d = new Date(); d.setDate(d.getDate() + 3);
+        return d.toISOString().split('T')[0];
+    };
+    const timeSlots = ['6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM', '1:00 PM'];
 
     const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const discountAmount = Math.round(total * couponDiscount / 100);
     const finalTotal = total - discountAmount;
-    const loyaltyThreshold = 5;
-    const earnedReward = orderCount >= loyaltyThreshold;
+
 
     // ─── Smart Ordering Lock ──────────────────────────
     useEffect(() => {
@@ -44,16 +60,21 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
         return () => clearInterval(interval);
     }, []);
 
-    const handlePlaceOrder = async (e) => {
+    // Step 1: Validate and show confirmation
+    const handlePlaceOrder = (e) => {
         e.preventDefault();
-
-        // Validate phone
         const cleanPhone = customerPhone.replace(/\D/g, '');
         if (cleanPhone.length !== 10 || !/^[6-9]/.test(cleanPhone)) {
             setPhoneError('Enter a valid 10-digit Indian phone number');
             return;
         }
         setPhoneError('');
+        setShowConfirm(true);
+    };
+
+    // Step 2: Confirm and place order
+    const confirmAndPlaceOrder = async () => {
+        setShowConfirm(false);
         setIsOrdering(true);
 
         localStorage.setItem('customerName', customerName);
@@ -63,7 +84,8 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
             items: cart.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, price: item.price })),
             total: finalTotal,
             customerName,
-            customerPhone
+            customerPhone,
+            ...(isScheduled && scheduledDate ? { scheduledDate, scheduledTime } : {})
         };
 
         try {
@@ -76,7 +98,11 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
             // Save cart items for Repeat Last Order feature
             localStorage.setItem('lastOrder', JSON.stringify(cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity }))));
 
-            const message = `${t('waHeader')}\n━━━━━━━━━━━━━━━━━━\n📋 Order #${orderToken}\n\n${t('waItems')}:\n` +
+            const scheduleInfo = isScheduled && scheduledDate
+                ? `\n\n📅 SCHEDULED ORDER\n🗓️ Date: ${new Date(scheduledDate).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}\n⏰ Time: ${scheduledTime || 'Any time (6AM–1PM)'}`
+                : '';
+
+            const message = `${t('waHeader')}\n━━━━━━━━━━━━━━━━━━\n📋 Order #${orderToken}${scheduleInfo}\n\n${t('waItems')}:\n` +
                 cart.map(item => `  • ${item.quantity}× ${item.name} — ₹${item.price * item.quantity}`).join('\n') +
                 (discountAmount > 0 ? `\n\n🏷️ ${t('discount')}: -₹${discountAmount} (${couponDiscount}%)` : '') +
                 `\n\n${t('waTotal')}: ₹${finalTotal}\n${t('waName')}: ${customerName}\n${t('waPhone')}: ${customerPhone}` +
@@ -108,20 +134,92 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
         }
     };
 
-    const handleDownloadReceipt = async () => {
-        if (!receiptRef.current) return;
+    const handleDownloadReceipt = () => {
+        if (!orderData) return;
         try {
-            const canvas = await html2canvas(receiptRef.current, {
-                backgroundColor: '#1A1A2E',
-                scale: 2,
-                useCORS: true,
+            const doc = new jsPDF({ unit: 'mm', format: [80, 200] }); // receipt-width
+            const w = 80;
+            let y = 10;
+
+            // Header
+            doc.setFillColor(26, 26, 46);
+            doc.rect(0, 0, w, 200, 'F');
+            doc.setTextColor(212, 175, 55);
+            doc.setFontSize(16);
+            doc.setFont('helvetica', 'bold');
+            doc.text('OG BIRIYANI', w / 2, y, { align: 'center' });
+            y += 5;
+            doc.setFontSize(7);
+            doc.setTextColor(180, 160, 100);
+            doc.text('Homemade Food · Prepared Daily Fresh', w / 2, y, { align: 'center' });
+            y += 4;
+            doc.setDrawColor(212, 175, 55);
+            doc.setLineWidth(0.3);
+            doc.line(8, y, w - 8, y);
+            y += 5;
+
+            // Order info
+            doc.setFontSize(8);
+            doc.setTextColor(200, 180, 120);
+            doc.text(`Order #${orderData.orderNumber}`, w / 2, y, { align: 'center' });
+            y += 4;
+            doc.setFontSize(7);
+            doc.setTextColor(160, 140, 90);
+            doc.text(orderData.date || new Date().toLocaleDateString('en-IN'), w / 2, y, { align: 'center' });
+            y += 6;
+
+            // Items
+            doc.setDrawColor(100, 90, 60);
+            doc.setLineWidth(0.15);
+            doc.line(8, y, w - 8, y);
+            y += 4;
+            doc.setFontSize(8);
+            orderData.items.forEach(item => {
+                doc.setTextColor(220, 200, 150);
+                doc.text(`${item.quantity}× ${item.name}`, 8, y);
+                doc.setTextColor(212, 175, 55);
+                doc.text(`₹${item.price * item.quantity}`, w - 8, y, { align: 'right' });
+                y += 5;
             });
-            const link = document.createElement('a');
-            link.download = `OG-Biryani-Receipt-${orderData?.orderNumber || 'order'}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+
+            // Discount
+            if (orderData.discount && orderData.discount > 0) {
+                doc.setTextColor(52, 211, 153);
+                doc.text('Discount', 8, y);
+                doc.text(`-₹${orderData.discount}`, w - 8, y, { align: 'right' });
+                y += 5;
+            }
+
+            // Total
+            y += 1;
+            doc.line(8, y, w - 8, y);
+            y += 5;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(212, 175, 55);
+            doc.text('Total', 8, y);
+            doc.text(`₹${orderData.total}`, w - 8, y, { align: 'right' });
+            y += 7;
+
+            // Customer info
+            doc.line(8, y, w - 8, y);
+            y += 4;
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(160, 140, 90);
+            doc.text(`Name: ${orderData.customerName}`, 8, y); y += 4;
+            doc.text(`Phone: ${orderData.customerPhone}`, 8, y); y += 6;
+
+            // Footer
+            doc.setTextColor(130, 120, 80);
+            doc.setFontSize(6);
+            doc.text('Thank you for ordering with OG Biryani ❤', w / 2, y, { align: 'center' });
+            y += 4;
+            doc.text(`Track: ${window.location.origin}/track/${orderData.orderNumber}`, w / 2, y, { align: 'center' });
+
+            doc.save(`OG-Biryani-Receipt-${orderData.orderNumber}.pdf`);
         } catch (err) {
-            console.error("Receipt download failed:", err);
+            console.error('Receipt download failed:', err);
         }
     };
 
@@ -131,30 +229,51 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
             <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6 max-w-md mx-auto"
+                className="relative flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6 max-w-md mx-auto overflow-hidden"
             >
+                {/* 🎊 Confetti Burst */}
+                <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+                    {Array.from({ length: 30 }).map((_, i) => {
+                        const colors = ['#D4AF37', '#34D399', '#F59E0B', '#EC4899', '#8B5CF6', '#3B82F6', '#EF4444', '#06B6D4'];
+                        const color = colors[i % colors.length];
+                        const left = Math.random() * 100;
+                        const delay = Math.random() * 1.2;
+                        const size = 6 + Math.random() * 8;
+                        const rotation = Math.random() * 360;
+                        const isCircle = i % 3 === 0;
+                        return (
+                            <motion.div
+                                key={i}
+                                initial={{ y: -20, x: 0, opacity: 1, rotate: 0, scale: 1 }}
+                                animate={{
+                                    y: ['0vh', '110vh'],
+                                    x: [0, (Math.random() - 0.5) * 200],
+                                    opacity: [1, 1, 0],
+                                    rotate: [0, rotation + 720],
+                                    scale: [1, 0.5],
+                                }}
+                                transition={{ duration: 2.5 + Math.random() * 1.5, delay, ease: 'easeIn' }}
+                                style={{
+                                    position: 'absolute',
+                                    left: `${left}%`,
+                                    top: -10,
+                                    width: size,
+                                    height: isCircle ? size : size * 2.5,
+                                    backgroundColor: color,
+                                    borderRadius: isCircle ? '50%' : '2px',
+                                }}
+                            />
+                        );
+                    })}
+                </div>
+
                 <div className="w-20 h-20 rounded-full bg-green-accent/10 flex items-center justify-center glow-gold">
                     <CheckCircle className="w-12 h-12 text-green-accent" />
                 </div>
                 <h2 className="text-3xl font-serif font-bold text-gradient-gold">{t('orderPlaced')}</h2>
                 <p className="text-gold-300/60 font-light">Verify details on WhatsApp to confirm your order.</p>
 
-                {/* Loyalty Reward */}
-                {earnedReward && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.3 }}
-                        className="glass-card p-4 flex items-center gap-3 glow-gold w-full"
-                        style={{ borderColor: 'rgba(52, 211, 153, 0.3)' }}
-                    >
-                        <span className="text-2xl">🎉</span>
-                        <div className="text-left">
-                            <p className="text-sm font-semibold text-green-accent">Congrats! You earned a free Coke!</p>
-                            <p className="text-xs text-gold-300/40">Mention this at pickup/delivery to claim.</p>
-                        </div>
-                    </motion.div>
-                )}
+
 
                 {/* Receipt Card */}
                 <div
@@ -261,29 +380,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                 </motion.div>
             )}
 
-            {/* Loyalty Streak Badge */}
-            {orderCount > 0 && (
-                <div className="glass-card-light p-3 mb-6 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gold-500/10 flex items-center justify-center">
-                        <Award size={16} className="text-gold-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gold-300/60">
-                            Biryani Streak: <span className="text-gold-400 font-bold">{orderCount}</span> order{orderCount !== 1 ? 's' : ''}
-                            {!earnedReward && <span className="text-gold-300/30"> — {loyaltyThreshold - orderCount} more for a free Coke!</span>}
-                        </p>
-                        {/* Progress bar */}
-                        <div className="mt-1.5 h-1.5 bg-dark-700/50 rounded-full overflow-hidden">
-                            <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${Math.min(100, (orderCount / loyaltyThreshold) * 100)}%` }}
-                                transition={{ delay: 0.3, duration: 0.6 }}
-                                className="h-full rounded-full bg-gradient-to-r from-gold-600 to-gold-400"
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             {/* Cart Items */}
             <div className="space-y-3 mb-8">
@@ -315,7 +412,8 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                                     <span className="font-bold w-6 text-center text-gold-300 tabular-nums text-sm">{item.quantity}</span>
                                     <button
                                         onClick={() => updateQuantity(item.id, 1)}
-                                        className="w-7 h-7 rounded-full flex items-center justify-center text-gold-400 hover:bg-gold-500/15 transition-colors"
+                                        disabled={item.quantity >= 20}
+                                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${item.quantity >= 20 ? 'text-gold-300/30 cursor-not-allowed bg-transparent' : 'text-gold-400 hover:bg-gold-500/15'}`}
                                     >
                                         <Plus size={14} />
                                     </button>
@@ -397,6 +495,28 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                 {couponApplied && <p className="text-green-accent text-xs mt-1.5">✓ Coupon {couponApplied} applied — {couponDiscount}% off!</p>}
             </div>
 
+            {/* Total Exceeded Banner */}
+            {finalTotal > 5000 && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="glass-card-light p-4 mb-6 border-red-500/30 bg-red-500/5"
+                >
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={20} />
+                        <div>
+                            <h4 className="text-sm font-bold text-red-400 mb-1">Catering Order Required</h4>
+                            <p className="text-xs text-red-300/70 leading-relaxed">
+                                Your order total exceeds the maximum website limit of <b>₹5,000</b>. For large catering orders, please call us directly to confirm availability and prep time.
+                            </p>
+                            <a href="tel:9363164680" className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg text-xs font-bold transition-all border border-red-500/20">
+                                <Phone size={14} /> Call 93631 64680 to Order
+                            </a>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+
             {/* Order Form */}
             <form onSubmit={handlePlaceOrder} className="space-y-4">
                 <div className="relative">
@@ -436,10 +556,83 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                     )}
                 </div>
 
+                {/* Schedule / Pre-Order Toggle */}
+                <div className="glass-card-light p-4">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsScheduled(!isScheduled);
+                            if (!isScheduled && !scheduledDate) setScheduledDate(getTomorrow());
+                        }}
+                        className={`w-full flex items-center gap-3 transition-all ${isScheduled ? 'text-gold-400' : 'text-gold-300/50 hover:text-gold-300/70'}`}
+                    >
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isScheduled ? 'bg-gold-500/20' : 'bg-dark-700/50'
+                            }`}>
+                            <CalendarClock size={16} />
+                        </div>
+                        <div className="text-left flex-1">
+                            <p className="text-sm font-semibold">Schedule for Later</p>
+                            <p className="text-[10px] text-gold-300/35">Pre-order for tomorrow or day after</p>
+                        </div>
+                        <div className={`w-10 h-5 rounded-full relative transition-all ${isScheduled ? 'bg-gold-500' : 'bg-dark-600'
+                            }`}>
+                            <motion.div
+                                animate={{ x: isScheduled ? 20 : 2 }}
+                                className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm"
+                            />
+                        </div>
+                    </button>
+
+                    <AnimatePresence>
+                        {isScheduled && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <div className="mt-3 pt-3 border-t border-gold-600/10 space-y-3">
+                                    {/* Date Picker */}
+                                    <div>
+                                        <label className="text-[10px] text-gold-300/40 uppercase tracking-wider block mb-1">Pickup Date</label>
+                                        <input
+                                            type="date"
+                                            min={getTomorrow()}
+                                            max={getMaxDate()}
+                                            value={scheduledDate}
+                                            onChange={e => setScheduledDate(e.target.value)}
+                                            className="w-full p-3 bg-dark-700/50 border border-gold-600/20 rounded-xl text-gold-200 text-sm focus:outline-none focus:border-gold-500/50"
+                                        />
+                                    </div>
+                                    {/* Time Slot Selector */}
+                                    <div>
+                                        <label className="text-[10px] text-gold-300/40 uppercase tracking-wider block mb-1.5">Preferred Time</label>
+                                        <div className="grid grid-cols-4 gap-1.5">
+                                            {timeSlots.map(slot => (
+                                                <button
+                                                    key={slot}
+                                                    type="button"
+                                                    onClick={() => setScheduledTime(scheduledTime === slot ? '' : slot)}
+                                                    className={`py-1.5 px-1 text-[11px] rounded-lg font-medium transition-all ${scheduledTime === slot
+                                                        ? 'bg-gold-500/20 text-gold-400 border border-gold-500/40'
+                                                        : 'bg-dark-700/30 text-gold-300/40 border border-transparent hover:border-gold-600/20'
+                                                        }`}
+                                                >
+                                                    {slot}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+
                 <button
                     type="submit"
-                    disabled={isOrdering || isOrderingLocked}
-                    className={`w-full font-bold py-4 rounded-xl flex justify-center items-center gap-3 text-lg transition-all ${isOrderingLocked
+                    disabled={isOrdering || isOrderingLocked || finalTotal > 5000}
+                    className={`w-full font-bold py-4 rounded-xl flex justify-center items-center gap-3 text-lg transition-all ${isOrderingLocked || finalTotal > 5000
                         ? 'bg-dark-600 text-gold-300/30 cursor-not-allowed'
                         : 'bg-gradient-to-r from-gold-600 to-gold-500 text-dark-900 hover:from-gold-500 hover:to-gold-400 btn-shimmer glow-gold-strong disabled:opacity-50'
                         }`}
@@ -454,6 +647,11 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                             <Clock size={20} />
                             {t('ordersClosedBanner')}
                         </div>
+                    ) : finalTotal > 5000 ? (
+                        <div className="flex items-center gap-2 text-red-400/80 text-sm">
+                            <AlertTriangle size={18} />
+                            Maximum order limit (₹5,000) exceeded
+                        </div>
                     ) : (
                         <>
                             {t('placeOrderWhatsApp')} <Phone size={20} />
@@ -461,6 +659,69 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                     )}
                 </button>
             </form>
+
+            {/* Confirmation Modal */}
+            <AnimatePresence>
+                {showConfirm && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                        style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}
+                        onClick={() => setShowConfirm(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={e => e.stopPropagation()}
+                            className="glass-card p-6 max-w-md w-full space-y-5"
+                            style={{ borderColor: 'rgba(212, 175, 55, 0.3)' }}
+                        >
+                            <div className="text-center">
+                                <h3 className="text-xl font-serif font-bold text-gradient-gold">Confirm Your Order</h3>
+                                <p className="text-xs text-gold-300/40 mt-1">Review before sending on WhatsApp</p>
+                            </div>
+                            <div className="space-y-2 bg-dark-800/50 rounded-xl p-4">
+                                {cart.map((item, i) => (
+                                    <div key={i} className="flex justify-between text-sm">
+                                        <span className="text-gold-200/80">{item.quantity}× {item.name}</span>
+                                        <span className="text-gold-400 font-semibold tabular-nums">₹{item.price * item.quantity}</span>
+                                    </div>
+                                ))}
+                                {discountAmount > 0 && (
+                                    <div className="flex justify-between text-sm text-green-400">
+                                        <span>Discount ({couponDiscount}%)</span>
+                                        <span>-₹{discountAmount}</span>
+                                    </div>
+                                )}
+                                <div className="border-t border-gold-700/20 pt-2 flex justify-between">
+                                    <span className="font-serif text-gold-300">{t('total')}</span>
+                                    <span className="font-bold text-gradient-gold text-lg">₹{finalTotal}</span>
+                                </div>
+                            </div>
+                            <div className="text-xs text-gold-300/50">
+                                <p>👤 {customerName} &nbsp;|&nbsp; 📞 {customerPhone}</p>
+                            </div>
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={confirmAndPlaceOrder}
+                                    className="w-full py-3.5 bg-gradient-to-r from-green-600 to-green-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 text-sm hover:from-green-500 hover:to-green-400 transition-all btn-shimmer"
+                                >
+                                    ✅ Confirm & Send on WhatsApp
+                                </button>
+                                <button
+                                    onClick={() => setShowConfirm(false)}
+                                    className="w-full py-2.5 text-sm text-gold-300/50 hover:text-gold-300/80 transition-colors"
+                                >
+                                    ← Go Back & Edit
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

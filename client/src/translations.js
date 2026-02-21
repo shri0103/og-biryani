@@ -26,7 +26,7 @@ const TRANSLATIONS = {
     minutes: { en: 'Minutes', ta: 'நிமிடம்' },
     seconds: { en: 'Seconds', ta: 'வினாடி' },
     whatCustomersSay: { en: 'What Our Customers Say', ta: 'வாடிக்கையாளர் கருத்துகள்' },
-    biryaniStreak: { en: 'Biryani Streak 🔥', ta: 'பிரியாணி ஸ்ட்ரீக் 🔥' },
+
     loyaltyReward: { en: 'You earned a reward!', ta: 'உங்களுக்கு வெகுமதி கிடைத்தது!' },
     ordersToReward: { en: 'orders to earn a reward', ta: 'ஆர்டர்கள் வெகுமதிக்கு' },
     callUs: { en: 'Call Us', ta: 'எங்களை அழைக்கவும்' },
@@ -36,6 +36,7 @@ const TRANSLATIONS = {
     copied: { en: 'Copied!', ta: 'நகலெடுக்கப்பட்டது!' },
 
     // ─── Menu Page ─────────────────────────────
+    searchMenu: { en: 'Search menu...', ta: 'மெனு தேடு...' },
     ourPremiumMenu: { en: 'Our Premium Menu', ta: 'எங்கள் சிறப்பு மெனு' },
     homemadeFood: { en: 'Homemade Food · Prepared Daily Fresh', ta: 'வீட்டுச் சமையல் · தினமும் புதிதாக தயாரிக்கப்படுகிறது' },
     todaysSpecial: { en: "Today's Special", ta: 'இன்றைய சிறப்பு' },

@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -7,7 +7,21 @@ const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const webpush = require('web-push');
 const db = require('./database');
+
+// ─── Web Push Setup ──────────────────────────
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+        'mailto:ogbiriyani@gmail.com',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+    console.log('✅ Web Push configured');
+    console.log('Public Key (first 20 chars):', process.env.VAPID_PUBLIC_KEY.substring(0, 20) + '...');
+} else {
+    console.log('⚠️  VAPID keys not set — push notifications disabled');
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -69,10 +83,10 @@ const globalLimiter = rateLimit({
 });
 app.use('/api/', globalLimiter);
 
-// 6. Strict login rate limit — 5 attempts per 15 minutes per IP
+// 6. Strict login rate limit — 20 attempts per 15 minutes per IP
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    max: 20,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts. Please wait 15 minutes.' },
@@ -175,9 +189,12 @@ app.get('/api/admin/verify', authMiddleware, (req, res) => {
 // ─── MENU (Public: GET | Protected: POST, PUT, DELETE)
 // ═══════════════════════════════════════════════════════
 
-// Get Menu (public)
+// Get Menu (public — only active items)
 app.get('/api/menu', (req, res) => {
-    db.all("SELECT * FROM menu", [], (err, rows) => {
+    // If admin query param passed, return all items (for admin panel)
+    const showAll = req.query.all === '1';
+    const sql = showAll ? 'SELECT * FROM menu' : 'SELECT * FROM menu WHERE is_active = 1';
+    db.all(sql, [], (err, rows) => {
         if (err) return safeError(res, 500, 'Failed to load menu', err);
         res.json({ message: "success", data: rows });
     });
@@ -217,9 +234,10 @@ app.put('/api/menu/:id', authMiddleware, (req, res) => {
     const category = sanitize(req.body.category, 50);
     const tag = sanitize(req.body.tag, 30);
     const available_days = sanitize(req.body.available_days, 50);
+    const image = sanitize(req.body.image, 500);
 
-    const sql = 'UPDATE menu SET name = ?, description = ?, price = ?, category = ?, tag = ?, available_days = ? WHERE id = ?';
-    db.run(sql, [name, description, price, category, tag, available_days, id], function (err) {
+    const sql = 'UPDATE menu SET name = ?, description = ?, price = ?, category = ?, tag = ?, available_days = ?, image = ? WHERE id = ?';
+    db.run(sql, [name, description, price, category, tag, available_days, image, id], function (err) {
         if (err) return safeError(res, 500, 'Failed to update menu item', err);
         if (this.changes === 0) return res.status(404).json({ error: 'Menu item not found' });
         res.json({ message: 'Menu item updated', data: { id, name, description, price, category, tag, available_days } });
@@ -249,6 +267,22 @@ app.delete('/api/menu/special', authMiddleware, (req, res) => {
     });
 });
 
+// Toggle Menu Item active/disabled (admin only)
+app.patch('/api/menu/:id/toggle', authMiddleware, (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    db.get('SELECT is_active FROM menu WHERE id = ?', [id], (err, row) => {
+        if (err) return safeError(res, 500, 'Failed to fetch item', err);
+        if (!row) return res.status(404).json({ error: 'Menu item not found' });
+        const newVal = row.is_active ? 0 : 1;
+        db.run('UPDATE menu SET is_active = ? WHERE id = ?', [newVal, id], function (err) {
+            if (err) return safeError(res, 500, 'Failed to toggle item', err);
+            res.json({ message: `Item ${newVal ? 'enabled' : 'disabled'}`, data: { id, is_active: newVal } });
+        });
+    });
+});
+
 // Delete Menu Item (admin only)
 app.delete('/api/menu/:id', authMiddleware, (req, res) => {
     const id = parseInt(req.params.id);
@@ -267,9 +301,17 @@ app.delete('/api/menu/:id', authMiddleware, (req, res) => {
 
 // Place Order (public, rate limited)
 app.post('/api/orders', orderLimiter, (req, res) => {
+    // 1. Enforce Server-Side Time Lock (6 AM to 1 PM)
+    const h = new Date().getHours();
+    if (h < 6 || h >= 13) {
+        return res.status(403).json({ error: 'Orders are currently closed. We are open from 6:00 AM to 1:00 PM.' });
+    }
+
     const { items, total } = req.body;
     const customerName = sanitize(req.body.customerName, 100);
     const customerPhone = sanitize(req.body.customerPhone, 20);
+    const scheduledDate = req.body.scheduledDate || null; // YYYY-MM-DD or null
+    const scheduledTime = req.body.scheduledTime ? sanitize(req.body.scheduledTime, 20) : null;
 
     // Validate inputs
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -279,16 +321,30 @@ app.post('/api/orders', orderLimiter, (req, res) => {
     if (!isValidPhone(customerPhone)) return res.status(400).json({ error: 'Valid phone number is required' });
     if (!total || isNaN(Number(total)) || Number(total) <= 0) return res.status(400).json({ error: 'Invalid total' });
 
-    // Sanitize each item in the order
+    // 2. Prevent Fake Large Orders (e.g. ₹2.5 Lakh spoof)
+    if (Number(total) > 5000) {
+        return res.status(400).json({ error: 'Orders over ₹5,000 must be placed by phone for catering verification.' });
+    }
+
+    // Validate scheduled date if provided
+    if (scheduledDate) {
+        const d = new Date(scheduledDate);
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (isNaN(d.getTime()) || d < today) {
+            return res.status(400).json({ error: 'Scheduled date must be today or a future date' });
+        }
+    }
+
+    // Sanitize each item in the order and enforce quantity limits
     const cleanItems = items.slice(0, 50).map(item => ({
         name: sanitize(item.name, 100),
         price: Number(item.price) || 0,
-        quantity: Math.min(Math.max(parseInt(item.quantity) || 1, 1), 100),
+        quantity: Math.min(Math.max(parseInt(item.quantity) || 1, 1), 20), // Hard cap at maximum 20 per item
     }));
 
     const orderToken = db.generateOrderToken();
-    const sql = 'INSERT INTO orders (items, total_amount, customer_name, customer_phone, status, order_token) VALUES (?,?,?,?,?,?)';
-    const params = [JSON.stringify(cleanItems), Number(total), customerName, customerPhone, 'Received', orderToken];
+    const sql = 'INSERT INTO orders (items, total_amount, customer_name, customer_phone, status, order_token, scheduled_date, scheduled_time) VALUES (?,?,?,?,?,?,?,?)';
+    const params = [JSON.stringify(cleanItems), Number(total), customerName, customerPhone, 'Received', orderToken, scheduledDate, scheduledTime];
 
     db.run(sql, params, function (err) {
         if (err) return safeError(res, 500, 'Failed to place order', err);
@@ -304,7 +360,7 @@ app.get('/api/orders/track/:token', (req, res) => {
         return res.status(400).json({ error: 'Invalid tracking token' });
     }
 
-    db.get('SELECT id, items, total_amount, customer_name, status, order_token, created_at FROM orders WHERE order_token = ?', [token], (err, row) => {
+    db.get('SELECT id, items, total_amount, customer_name, status, order_token, scheduled_date, scheduled_time, created_at FROM orders WHERE order_token = ?', [token], (err, row) => {
         if (err) return safeError(res, 500, 'Failed to track order', err);
         if (!row) return res.status(404).json({ error: 'Order not found' });
         res.json({ message: 'success', data: row });
@@ -333,7 +389,37 @@ app.patch('/api/orders/:id/status', authMiddleware, (req, res) => {
     db.run('UPDATE orders SET status = ? WHERE id = ?', [status, id], function (err) {
         if (err) return safeError(res, 500, 'Failed to update status', err);
         if (this.changes === 0) return res.status(404).json({ error: 'Order not found' });
+
+        // Send push notification to subscribers for this order
+        db.get('SELECT order_token, customer_name FROM orders WHERE id = ?', [id], (err2, order) => {
+            if (!err2 && order && order.order_token) {
+                sendPushForOrder(order.order_token, status, order.customer_name);
+            }
+        });
+
         res.json({ message: 'Status updated', data: { id, status } });
+    });
+});
+
+// Cancel Order (customer — only if status is 'Received' and within 10 min)
+app.delete('/api/orders/cancel/:token', (req, res) => {
+    const token = req.params.token;
+    db.get('SELECT * FROM orders WHERE order_token = ?', [token], (err, order) => {
+        if (err) return safeError(res, 500, 'Failed to find order', err);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+        if (order.status !== 'Received') {
+            return res.status(400).json({ error: 'Cannot cancel — order is already being prepared' });
+        }
+        // Allow cancel only within 10 minutes
+        const placed = new Date(order.created_at).getTime();
+        const now = Date.now();
+        if (now - placed > 10 * 60 * 1000) {
+            return res.status(400).json({ error: 'Cancellation window expired (10 minutes)' });
+        }
+        db.run('DELETE FROM orders WHERE order_token = ?', [token], (err2) => {
+            if (err2) return safeError(res, 500, 'Failed to cancel order', err2);
+            res.json({ message: 'Order cancelled successfully' });
+        });
     });
 });
 
@@ -391,6 +477,59 @@ app.post('/api/orders/:token/feedback', (req, res) => {
             if (err) return safeError(res, 500, 'Failed to save feedback', err);
             if (this.changes === 0) return res.status(404).json({ error: 'Order not found' });
             res.json({ message: 'Feedback submitted', data: { rating, feedback } });
+        }
+    );
+});
+
+// ═══════════════════════════════════════════════════════
+// ─── PUBLIC REVIEWS ──────────────────────────────────
+// ═══════════════════════════════════════════════════════
+
+// Aggregated ratings per menu item (public)
+app.get('/api/reviews/menu', (req, res) => {
+    // Parse order items JSON, aggregate ratings by item name
+    db.all(
+        `SELECT items, rating FROM orders WHERE rating >= 1 AND rating <= 5`,
+        [],
+        (err, rows) => {
+            if (err) return safeError(res, 500, 'Failed to load reviews', err);
+
+            const itemRatings = {};
+            (rows || []).forEach(row => {
+                try {
+                    const items = JSON.parse(row.items);
+                    items.forEach(item => {
+                        if (!itemRatings[item.name]) {
+                            itemRatings[item.name] = { total: 0, count: 0 };
+                        }
+                        itemRatings[item.name].total += row.rating;
+                        itemRatings[item.name].count += 1;
+                    });
+                } catch (e) { }
+            });
+
+            const result = Object.entries(itemRatings).map(([name, data]) => ({
+                name,
+                avgRating: Math.round((data.total / data.count) * 10) / 10,
+                reviewCount: data.count
+            }));
+
+            res.json({ message: 'success', data: result });
+        }
+    );
+});
+
+// Latest positive reviews for public display
+app.get('/api/reviews/latest', (req, res) => {
+    db.all(
+        `SELECT customer_name, rating, feedback, created_at
+         FROM orders
+         WHERE rating >= 4 AND feedback IS NOT NULL AND feedback != ''
+         ORDER BY id DESC LIMIT 10`,
+        [],
+        (err, rows) => {
+            if (err) return safeError(res, 500, 'Failed to load reviews', err);
+            res.json({ message: 'success', data: rows || [] });
         }
     );
 });
@@ -465,7 +604,8 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
     const stats = {};
 
     db.get(
-        `SELECT COUNT(*) as total_orders, COALESCE(SUM(total_amount), 0) as total_revenue 
+        `SELECT COUNT(*) as total_orders, COALESCE(SUM(total_amount), 0) as total_revenue,
+                COALESCE(ROUND(AVG(total_amount)), 0) as avg_order
          FROM orders WHERE DATE(created_at) = CURDATE()`,
         [],
         (err, today) => {
@@ -512,7 +652,62 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
                                     (err, statusBreakdown) => {
                                         if (err) return safeError(res, 500, 'Failed to load stats', err);
                                         stats.statusBreakdown = statusBreakdown || [];
-                                        res.json({ message: 'success', data: stats });
+
+                                        // Peak ordering hours (today)
+                                        db.all(
+                                            `SELECT HOUR(created_at) as hour, COUNT(*) as count
+                                             FROM orders WHERE DATE(created_at) = CURDATE()
+                                             GROUP BY HOUR(created_at) ORDER BY hour`,
+                                            [],
+                                            (err, peakHours) => {
+                                                if (err) return safeError(res, 500, 'Failed to load stats', err);
+                                                stats.peakHours = peakHours || [];
+
+                                                // Repeat customers (all time, top 10)
+                                                db.all(
+                                                    `SELECT customer_phone, MAX(customer_name) as customer_name, COUNT(*) as order_count,
+                                                            COALESCE(SUM(total_amount), 0) as total_spent
+                                                     FROM orders
+                                                     WHERE customer_phone IS NOT NULL AND customer_phone != ''
+                                                     GROUP BY customer_phone
+                                                     HAVING COUNT(*) > 1
+                                                     ORDER BY order_count DESC LIMIT 10`,
+                                                    [],
+                                                    (err, repeatCustomers) => {
+                                                        if (err) return safeError(res, 500, 'Failed to load stats', err);
+                                                        stats.repeatCustomers = repeatCustomers || [];
+
+                                                        // Monthly revenue (last 30 days grouped by week)
+                                                        db.all(
+                                                            `SELECT YEARWEEK(created_at, 1) as week_num,
+                                                                    MIN(DATE(created_at)) as week_start,
+                                                                    COUNT(*) as orders,
+                                                                    COALESCE(SUM(total_amount), 0) as revenue
+                                                             FROM orders WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                                                             GROUP BY YEARWEEK(created_at, 1) ORDER BY week_num`,
+                                                            [],
+                                                            (err, monthly) => {
+                                                                if (err) return safeError(res, 500, 'Failed to load stats', err);
+                                                                stats.monthly = monthly || [];
+
+                                                                // Review stats
+                                                                db.get(
+                                                                    `SELECT COALESCE(ROUND(AVG(rating), 1), 0) as avgRating,
+                                                                            COUNT(*) as reviewCount
+                                                                     FROM orders WHERE rating >= 1 AND rating <= 5`,
+                                                                    [],
+                                                                    (err, reviewStats) => {
+                                                                        if (err) return safeError(res, 500, 'Failed to load stats', err);
+                                                                        stats.reviews = reviewStats || { avgRating: 0, reviewCount: 0 };
+                                                                        res.json({ message: 'success', data: stats });
+                                                                    }
+                                                                );
+                                                            }
+                                                        );
+                                                    }
+                                                );
+                                            }
+                                        );
                                     }
                                 );
                             }
@@ -523,6 +718,158 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
         }
     );
 });
+
+// ═══════════════════════════════════════════════════════
+// ─── PUSH NOTIFICATIONS ─────────────────────────────
+// ═══════════════════════════════════════════════════════
+
+// Get VAPID public key (needed by client to subscribe)
+app.get('/api/push/vapid-key', (req, res) => {
+    res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || '' });
+});
+
+// Subscribe to push notifications
+app.post('/api/push/subscribe', (req, res) => {
+    const { subscription, orderToken } = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+        return res.status(400).json({ error: 'Invalid subscription' });
+    }
+
+    db.run(
+        'INSERT INTO push_subscriptions (endpoint, p256dh, auth, order_token) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE order_token = VALUES(order_token), p256dh = VALUES(p256dh), auth = VALUES(auth)',
+        [subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth, orderToken || null],
+        (err) => {
+            if (err) return safeError(res, 500, 'Failed to save subscription', err);
+            res.json({ message: 'Subscribed successfully' });
+        }
+    );
+});
+
+// Test push notification (public, simple test endpoint)
+app.post('/api/push/test', (req, res) => {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint) {
+        return res.status(400).json({ error: 'Invalid subscription' });
+    }
+
+    const payload = JSON.stringify({
+        title: 'Test Notification',
+        body: 'Testing from OG Biriyani!',
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png'
+    });
+
+    webpush.sendNotification(subscription, payload)
+        .then(() => res.json({ message: 'Test notification sent successfully!' }))
+        .catch((err) => safeError(res, 500, 'Failed to send test notification', err));
+});
+
+// Broadcast push notification (admin only)
+app.post('/api/push/broadcast', authMiddleware, (req, res) => {
+    const title = sanitize(req.body.title, 100);
+    const body = sanitize(req.body.body, 500);
+
+    if (!title || !body) {
+        return res.status(400).json({ error: 'Title and body are required' });
+    }
+
+    if (!process.env.VAPID_PUBLIC_KEY) {
+        return res.status(500).json({ error: 'Push notifications are not configured on the server' });
+    }
+
+    const payload = JSON.stringify({
+        title,
+        body,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+        data: { url: '/menu' },
+    });
+
+    // Get all unique endpoints (in case of duplicates before the UNIQUE constraint was added)
+    db.all('SELECT MIN(id) as id, endpoint, MAX(p256dh) as p256dh, MAX(auth) as auth FROM push_subscriptions GROUP BY endpoint', [], (err, subs) => {
+        if (err) return safeError(res, 500, 'Failed to fetch subscriptions', err);
+        if (!subs || subs.length === 0) return res.json({ message: 'No subscribers found', data: { successCount: 0, failCount: 0 } });
+
+        console.log(`[BROADCAST] Sending announcement to ${subs.length} devices...`);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        const promises = subs.map(sub => {
+            const pushSub = {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.p256dh, auth: sub.auth },
+            };
+            return webpush.sendNotification(pushSub, payload)
+                .then(() => { successCount++; })
+                .catch(err => {
+                    failCount++;
+                    if (err.statusCode === 410 || err.statusCode === 404) {
+                        db.run('DELETE FROM push_subscriptions WHERE endpoint = ?', [sub.endpoint]);
+                    }
+                });
+        });
+
+        Promise.all(promises).then(() => {
+            console.log(`[BROADCAST] Finished: ${successCount} successful, ${failCount} failed.`);
+            res.json({ message: 'Broadcast complete', data: { successCount, failCount } });
+        });
+    });
+});
+
+// Helper: send push to all subscribers for an order token
+function sendPushForOrder(orderToken, status, customerName) {
+    console.log(`[PUSH] Triggered sendPushForOrder for token: ${orderToken}, status: ${status}`);
+    if (!process.env.VAPID_PUBLIC_KEY) {
+        console.log('[PUSH] Aborted: VAPID keys not configured in environment.');
+        return;
+    }
+
+    const statusMessages = {
+        Preparing: `👨‍🍳 Your order is being prepared!`,
+        Ready: `✅ Your order is READY for pickup!`,
+        Delivered: `🎉 Your order has been delivered! Enjoy!`,
+    };
+
+    const body = statusMessages[status] || `Order status: ${status}`;
+    const payload = JSON.stringify({
+        title: `OG Biriyani — Order Update`,
+        body: body,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+        data: { url: `/track/${orderToken}` },
+    });
+
+    db.all('SELECT * FROM push_subscriptions WHERE order_token = ?', [orderToken], (err, subs) => {
+        if (err) {
+            console.error('[PUSH] DB Error fetching subscriptions:', err);
+            return;
+        }
+        if (!subs || subs.length === 0) {
+            console.log(`[PUSH] No active push subscriptions found for order token: ${orderToken}`);
+            return;
+        }
+
+        console.log(`[PUSH] Found ${subs.length} push subscriptions for order ${orderToken}. Sending payload...`);
+
+        subs.forEach(sub => {
+            const pushSub = {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.p256dh, auth: sub.auth },
+            };
+            webpush.sendNotification(pushSub, payload)
+                .then(() => console.log(`[PUSH] Success! Notification sent to endpoint: ${sub.endpoint.substring(0, 30)}...`))
+                .catch(err => {
+                    console.error(`[PUSH] Failed to send to endpoint ${sub.endpoint.substring(0, 30)}... Error:`, err);
+                    // Remove invalid subscriptions
+                    if (err.statusCode === 410 || err.statusCode === 404) {
+                        console.log(`[PUSH] Removing expired/invalid subscription ID: ${sub.id}`);
+                        db.run('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]);
+                    }
+                });
+        });
+    });
+}
 
 // ═══════════════════════════════════════════════════════
 // ─── SERVE FRONTEND (Production) ─────────────────────

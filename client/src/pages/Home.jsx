@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Clock, Star, ChevronRight, Award, Share2, MapPin, Copy, Navigation, RotateCcw, X } from 'lucide-react';
+import { ArrowRight, Clock, Star, ChevronRight, Share2, MapPin, Copy, Navigation, RotateCcw, X } from 'lucide-react';
 import { useLang } from '../App';
 
 const TrackLastOrder = () => {
@@ -174,11 +174,23 @@ const CountdownTimer = () => {
 
 const Reviews = () => {
     const { t } = useLang();
-    const reviews = [
-        { id: 1, name: "Rahul K.", text: "Best Biryani in town! The aroma is just authentic.", rating: 5 },
-        { id: 2, name: "Priya M.", text: "Loved the Chicken 65. Perfectly spicy and crispy.", rating: 5 },
-        { id: 3, name: "Suresh R.", text: "Quality quantity and affordable price. A must try!", rating: 4 },
-    ];
+    const [reviews, setReviews] = React.useState([
+        { id: 1, customer_name: "Rahul K.", feedback: "Best Biryani in town! The aroma is just authentic.", rating: 5 },
+        { id: 2, customer_name: "Priya M.", feedback: "Loved the Chicken 65. Perfectly spicy and crispy.", rating: 5 },
+        { id: 3, customer_name: "Suresh R.", feedback: "Quality quantity and affordable price. A must try!", rating: 4 },
+    ]);
+
+    React.useEffect(() => {
+        const API = import.meta.env.VITE_API_URL;
+        fetch(`${API}/reviews/latest`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.data && data.data.length > 0) {
+                    setReviews(data.data.map((r, i) => ({ ...r, id: i + 1 })));
+                }
+            })
+            .catch(() => { });
+    }, []);
 
     return (
         <div className="w-full max-w-5xl px-4 mt-20">
@@ -189,7 +201,7 @@ const Reviews = () => {
                 </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {reviews.map((review, index) => (
+                {reviews.slice(0, 6).map((review, index) => (
                     <motion.div
                         key={review.id}
                         initial={{ opacity: 0, y: 20 }}
@@ -210,8 +222,8 @@ const Reviews = () => {
                                 />
                             ))}
                         </div>
-                        <p className="text-gold-200/80 italic mb-4 leading-relaxed font-light">"{review.text}"</p>
-                        <p className="text-gold-400 font-semibold text-sm tracking-wide">— {review.name}</p>
+                        <p className="text-gold-200/80 italic mb-4 leading-relaxed font-light">"{review.feedback}"</p>
+                        <p className="text-gold-400 font-semibold text-sm tracking-wide">— {review.customer_name}</p>
                     </motion.div>
                 ))}
             </div>
@@ -219,47 +231,6 @@ const Reviews = () => {
     );
 };
 
-const LoyaltyProgress = ({ orderCount }) => {
-    const { t } = useLang();
-    const threshold = 5;
-    const progress = Math.min(100, (orderCount / threshold) * 100);
-    const earned = orderCount >= threshold;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.2 }}
-            className="w-full max-w-md glass-card p-5"
-        >
-            <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-full bg-gold-500/10 flex items-center justify-center">
-                    <Award size={18} className="text-gold-400" />
-                </div>
-                <div>
-                    <p className="text-sm font-semibold text-gold-300">{t('biryaniStreak')}</p>
-                    <p className="text-xs text-gold-300/40 leading-relaxed">
-                        {earned
-                            ? '🎉 You earned a free Coke! Claim at pickup.'
-                            : `${orderCount}/${threshold} orders — ${threshold - orderCount} more for a free Coke!`
-                        }
-                    </p>
-                </div>
-            </div>
-            <div className="h-2 bg-dark-700/50 rounded-full overflow-hidden">
-                <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progress}%` }}
-                    transition={{ delay: 1.5, duration: 0.8, ease: "easeOut" }}
-                    className={`h-full rounded-full ${earned
-                        ? 'bg-gradient-to-r from-green-accent to-green-accent/70'
-                        : 'bg-gradient-to-r from-gold-600 to-gold-400'
-                        }`}
-                />
-            </div>
-        </motion.div>
-    );
-};
 
 const Home = ({ orderCount = 0, addToCart }) => {
     const { t } = useLang();
@@ -334,9 +305,6 @@ const Home = ({ orderCount = 0, addToCart }) => {
                     <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
                 </Link>
             </motion.div>
-
-            {/* Loyalty Progress */}
-            {orderCount > 0 && <LoyaltyProgress orderCount={orderCount} />}
 
             {/* Repeat Last Order */}
             <RepeatLastOrder addToCart={addToCart} />
