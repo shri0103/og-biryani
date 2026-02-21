@@ -88,7 +88,9 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
     let data = { title: 'OG Biriyani', body: 'You have an update!' };
     try {
-        data = event.data.json();
+        if (event.data) {
+            data = event.data.json();
+        }
     } catch (e) {
         data.body = event.data ? event.data.text() : data.body;
     }
@@ -97,15 +99,16 @@ self.addEventListener('push', (event) => {
         body: data.body,
         icon: data.icon || '/icons/icon-192x192.png',
         badge: data.badge || '/icons/icon-192x192.png',
-        vibrate: [200, 100, 200],
-        data: data.data || {},
+        vibrate: data.vibrate || [200, 100, 200, 100, 200, 100, 200], // Stronger vibration
+        data: data.data || { url: '/' },
+        requireInteraction: true, // Forces notification to stay on screen until interacted with
         actions: [
-            { action: 'open', title: 'View Order' },
+            { action: 'open', title: 'Open App' },
         ],
     };
 
     event.waitUntil(
-        self.registration.showNotification(data.title, options)
+        self.registration.showNotification(data.title || 'OG Biriyani', options)
     );
 });
 

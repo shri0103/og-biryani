@@ -782,6 +782,8 @@ app.post('/api/push/broadcast', authMiddleware, (req, res) => {
         body,
         icon: '/icons/icon-192x192.png',
         badge: '/icons/icon-192x192.png',
+        vibrate: [200, 100, 200, 100, 200],
+        requireInteraction: true,
         data: { url: '/menu' },
     });
 

@@ -157,7 +157,7 @@ export default function NotificationToggle() {
                             animate={{ scale: 1 }}
                             exit={{ scale: 0 }}
                         >
-                            <BellRing size={20} />
+                            <BellRing size={18} className="sm:w-5 sm:h-5" />
                         </motion.div>
                     ) : permission === 'denied' ? (
                         <motion.div
@@ -166,7 +166,7 @@ export default function NotificationToggle() {
                             animate={{ scale: 1 }}
                             exit={{ scale: 0 }}
                         >
-                            <BellOff size={20} />
+                            <BellOff size={18} className="sm:w-5 sm:h-5" />
                         </motion.div>
                     ) : (
                         <motion.div
@@ -175,7 +175,7 @@ export default function NotificationToggle() {
                             animate={{ scale: 1 }}
                             exit={{ scale: 0 }}
                         >
-                            <Bell size={20} />
+                            <Bell size={18} className="sm:w-5 sm:h-5" />
                         </motion.div>
                     )}
                 </AnimatePresence>

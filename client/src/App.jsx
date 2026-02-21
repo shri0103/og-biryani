@@ -441,15 +441,15 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
           </div>
 
           {/* Mobile Menu Button */}
-          <div className="flex md:hidden items-center gap-3">
+          <div className="flex md:hidden items-center gap-1.5 sm:gap-3">
             <ThemeToggle />
             <LangNav />
             <NotificationToggle />
             <button
               onClick={() => setIsCartDrawerOpen(true)}
-              className="relative p-2 rounded-lg border border-gold-600/30 text-gold-400"
+              className="relative p-1.5 sm:p-2 rounded-lg border border-gold-600/30 text-gold-400"
             >
-              <ShoppingCart size={20} />
+              <ShoppingCart size={18} className="sm:w-5 sm:h-5" />
               {cart.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-ember-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
                   {cart.reduce((sum, item) => sum + item.quantity, 0)}
@@ -457,10 +457,10 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
               )}
             </button>
             <button
-              className="p-2 rounded-lg border border-gold-600/30 text-gold-400 hover:text-gold-300"
+              className="p-1.5 sm:p-2 rounded-lg border border-gold-600/30 text-gold-400 hover:text-gold-300"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
             >
-              {isMenuOpen ? <X size={22} /> : <MenuIcon size={22} />}
+              {isMenuOpen ? <X size={18} className="sm:w-[22px] sm:h-[22px]" /> : <MenuIcon size={18} className="sm:w-[22px] sm:h-[22px]" />}
             </button>
           </div>
         </div>
