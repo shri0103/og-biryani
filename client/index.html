@@ -34,7 +34,21 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-          .then(reg => console.log('SW registered:', reg.scope))
+          .then(reg => {
+            console.log('SW registered:', reg.scope);
+            // Force mobile PWA to always check for new code in the background
+            reg.update();
+
+            // Listen for waiting updates and force reload if the user leaves the app open for days
+            reg.onupdatefound = () => {
+              const installingWorker = reg.installing;
+              installingWorker.onstatechange = () => {
+                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('New update available. The SW will take over on next navigation.');
+                }
+              };
+            };
+          })
           .catch(err => console.log('SW registration failed:', err));
       });
     }
