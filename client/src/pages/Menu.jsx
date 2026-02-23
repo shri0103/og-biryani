@@ -113,8 +113,8 @@ const Menu = ({ addToCart, cart = [] }) => {
         const checkTime = () => {
             const now = new Date();
             const h = now.getHours();
-            // setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
-            setIsOrderingLocked(false); // TESTING: orders always open
+            setIsOrderingLocked(h < 6 || h >= 13); // Orders: 6 AM to 1 PM
+            // setIsOrderingLocked(false); // TESTING: orders always open
         };
         checkTime();
         const interval = setInterval(checkTime, 30000);
