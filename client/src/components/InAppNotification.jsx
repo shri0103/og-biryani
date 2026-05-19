@@ -24,14 +24,32 @@ export default function InAppNotification() {
     useEffect(() => {
         const checkOrderUpdates = async () => {
             const token = localStorage.getItem('customerToken');
-            if (!token) return;
+            const lastOrderToken = localStorage.getItem('lastOrderToken');
+            
+            // If neither logged in nor have a recent order, skip polling
+            if (!token && !lastOrderToken) return;
 
             try {
-                const res = await axios.get(`${import.meta.env.VITE_API_URL}/customer/orders`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                let currentOrders = [];
+
+                // 1. Fetch Auth User Orders
+                if (token) {
+                    const res = await axios.get(`${import.meta.env.VITE_API_URL}/customer/orders`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (res.data && res.data.data) {
+                        currentOrders = [...res.data.data];
+                    }
+                }
+
+                // 2. Fetch Guest Order (if not already included)
+                if (lastOrderToken && !currentOrders.some(o => o.order_token === lastOrderToken)) {
+                    const res = await axios.get(`${import.meta.env.VITE_API_URL}/orders/track/${lastOrderToken}`);
+                    if (res.data && res.data.data) {
+                        currentOrders.push(res.data.data);
+                    }
+                }
                 
-                const currentOrders = res.data.data;
                 const newOrdersMap = {};
 
                 currentOrders.forEach(order => {

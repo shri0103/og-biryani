@@ -175,6 +175,9 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                 orderNumber: orderToken,
             });
 
+            // Save order token so guest users can receive In-App Notifications
+            localStorage.setItem('lastOrderToken', orderToken);
+
             setOrderComplete(true);
             clearCart();
             // No auto-redirect — customer uses the Track button on confirmation screen
