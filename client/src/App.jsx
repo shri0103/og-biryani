@@ -9,9 +9,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Home as HomeIcon } from 'lucide-react';
 import TRANSLATIONS from './translations';
 import NotificationToggle from './components/NotificationToggle';
+import ChatBot from './components/ChatBot';
+import InAppNotification from './components/InAppNotification';
 
 // ─── Code-Split Lazy Imports ────────────────────────
 const Admin = React.lazy(() => import('./pages/Admin'));
+const Profile = React.lazy(() => import('./pages/Profile'));
 const OrderTrack = React.lazy(() => import('./pages/OrderTrack'));
 const OrderHistory = React.lazy(() => import('./pages/OrderHistory'));
 
@@ -349,7 +352,7 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
   const location = useLocation();
 
   // ─── SEO: Dynamic Page Titles ─────────────────────
-  const pageTitles = { '/': 'Home', '/menu': 'Menu', '/cart': 'Cart', '/history': 'Order History', '/admin': 'Admin' };
+  const pageTitles = { '/': 'Home', '/menu': 'Menu', '/cart': 'Cart', '/history': 'Order History', '/profile': 'Profile', '/admin': 'Admin' };
   const titleFromPath = location.pathname.startsWith('/track/') ? 'Track Order' : pageTitles[location.pathname];
   usePageTitle(titleFromPath);
 
@@ -420,6 +423,9 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
             <NavLink to="/">{t('home')}</NavLink>
             <NavLink to="/menu">{t('menu')}</NavLink>
             <NavLink to="/history">{t('history')}</NavLink>
+            <Link to="/profile" className="p-2 rounded-full border border-gold-600/30 hover:border-gold-500/60 transition-all hover:glow-gold text-gold-400 hover:text-gold-300">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </Link>
             <button
               onClick={() => setIsCartDrawerOpen(true)}
               className="relative group"
@@ -482,6 +488,7 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
                 <NavLink to="/" onClick={() => setIsMenuOpen(false)}>{t('home')}</NavLink>
                 <NavLink to="/menu" onClick={() => setIsMenuOpen(false)}>{t('menu')}</NavLink>
                 <NavLink to="/history" onClick={() => setIsMenuOpen(false)}>{t('history')}</NavLink>
+                <NavLink to="/profile" onClick={() => setIsMenuOpen(false)}>Profile / Login</NavLink>
               </div>
             </motion.div>
           )}
@@ -499,6 +506,7 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
               <Route path="/cart" element={<PageTransition><Cart cart={cart} removeFromCart={removeFromCart} updateQuantity={updateQuantity} clearCart={clearCart} orderCount={orderCount} /></PageTransition>} />
               <Route path="/track/:token" element={<PageTransition><OrderTrack /></PageTransition>} />
               <Route path="/history" element={<PageTransition><OrderHistory /></PageTransition>} />
+              <Route path="/profile" element={<PageTransition><Profile /></PageTransition>} />
               <Route path="/admin" element={<PageTransition><Admin /></PageTransition>} />
               <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
             </Routes>
@@ -605,6 +613,12 @@ function AppContent({ cart, setCart, addToCart, updateQuantity, removeFromCart, 
 
       {/* Scroll to Top */}
       <ScrollToTop />
+
+      {/* AI Biryani Bot */}
+      <ChatBot />
+
+      {/* In-App Notifications for order updates */}
+      <InAppNotification />
 
       {/* Toast Notification */}
       <AnimatePresence>

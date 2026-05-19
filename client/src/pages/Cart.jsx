@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, Phone, CheckCircle, Plus, Minus, ShoppingBag, Clock, Download, Share2, Navigation, Tag, CalendarClock, AlertTriangle } from 'lucide-react';
+import { Trash2, Phone, CheckCircle, Plus, Minus, ShoppingBag, Clock, Download, Share2, Navigation, Tag, CalendarClock, AlertTriangle, Eye, EyeOff, MessageCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +12,17 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
     const { t, lang } = useLang();
     const [customerName, setCustomerName] = useState(localStorage.getItem('customerName') || '');
     const [customerPhone, setCustomerPhone] = useState(localStorage.getItem('customerPhone') || '');
+    const [customerId, setCustomerId] = useState(null);
+    const [customerToken, setCustomerToken] = useState(localStorage.getItem('customerToken') || null);
+    
+    // Auth Modal State
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
+    const [authPassword, setAuthPassword] = useState('');
+    const [authError, setAuthError] = useState('');
+    const [authLoading, setAuthLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showForgotPwd, setShowForgotPwd] = useState(false);
     const [isOrdering, setIsOrdering] = useState(false);
     const [orderComplete, setOrderComplete] = useState(false);
     const [orderData, setOrderData] = useState(null);
@@ -46,6 +57,46 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
     const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const discountAmount = Math.round(total * couponDiscount / 100);
     const finalTotal = total - discountAmount;
+
+    // Check auth status on mount
+    useEffect(() => {
+        if (customerToken) {
+            axios.get(`${import.meta.env.VITE_API_URL}/auth/customer/me`, {
+                headers: { Authorization: `Bearer ${customerToken}` }
+            }).then(res => {
+                setCustomerName(res.data.customer.name);
+                setCustomerPhone(res.data.customer.phone);
+                setCustomerId(res.data.customer.id);
+            }).catch(() => {
+                // Token invalid or expired
+                setCustomerToken(null);
+                localStorage.removeItem('customerToken');
+            });
+        }
+    }, [customerToken]);
+
+    const handleAuth = async (e) => {
+        e.preventDefault();
+        setAuthLoading(true);
+        setAuthError('');
+        try {
+            const endpoint = authMode === 'login' ? '/auth/customer/login' : '/auth/customer/signup';
+            const payload = authMode === 'login' ? { phone: customerPhone, password: authPassword } : { name: customerName, phone: customerPhone, password: authPassword };
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}${endpoint}`, payload);
+            
+            setCustomerToken(res.data.token);
+            localStorage.setItem('customerToken', res.data.token);
+            setCustomerName(res.data.customer.name);
+            setCustomerPhone(res.data.customer.phone);
+            setCustomerId(res.data.customer.id);
+            setShowAuthModal(false);
+            setAuthPassword('');
+        } catch (err) {
+            setAuthError(err.response?.data?.error || 'Authentication failed');
+        } finally {
+            setAuthLoading(false);
+        }
+    };
 
 
     // ─── Smart Ordering Lock ──────────────────────────
@@ -85,6 +136,7 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
             total: finalTotal,
             customerName,
             customerPhone,
+            customerId,
             ...(isScheduled && scheduledDate ? { scheduledDate, scheduledTime } : {})
         };
 
@@ -519,42 +571,87 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
 
             {/* Order Form */}
             <form onSubmit={handlePlaceOrder} className="space-y-4">
-                <div className="relative">
-                    <input
-                        type="text"
-                        placeholder={t('yourName')}
-                        required
-                        className="w-full p-4 bg-dark-700/50 border border-gold-600/20 rounded-xl text-gold-200 placeholder-gold-300/30 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/20 font-light"
-                        value={customerName}
-                        onChange={e => setCustomerName(e.target.value)}
-                    />
+                {/* Auth Section */}
+                <div className="glass-card p-4 flex justify-between items-center bg-dark-800/80">
+                    <div>
+                        {customerToken ? (
+                            <div>
+                                <p className="text-sm font-bold text-gold-300">Welcome back, {customerName}!</p>
+                                <p className="text-xs text-gold-300/50">{customerPhone}</p>
+                            </div>
+                        ) : (
+                            <div>
+                                <p className="text-sm font-bold text-gold-300">Save your details for next time?</p>
+                                <p className="text-xs text-gold-300/50">Login or create an account</p>
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                        {customerToken ? (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCustomerToken(null);
+                                    setCustomerId(null);
+                                    localStorage.removeItem('customerToken');
+                                }}
+                                className="text-xs px-3 py-1 border border-gold-600/30 rounded text-gold-400 hover:bg-gold-500/10"
+                            >
+                                Logout
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => setShowAuthModal(true)}
+                                className="text-xs px-3 py-1 bg-gold-600 text-dark-900 rounded font-bold hover:bg-gold-500 shadow-[0_0_10px_rgba(212,175,55,0.3)]"
+                            >
+                                Login / Signup
+                            </button>
+                        )}
+                    </div>
                 </div>
-                <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-300/30 text-sm">+91</div>
-                    <input
-                        type="tel"
-                        placeholder={t('yourPhone')}
-                        required
-                        maxLength={10}
-                        pattern="[6-9][0-9]{9}"
-                        className={`w-full p-4 pl-12 bg-dark-700/50 border rounded-xl text-gold-200 placeholder-gold-300/30 focus:outline-none focus:ring-1 font-light ${phoneError
-                            ? 'border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20'
-                            : 'border-gold-600/20 focus:border-gold-500/50 focus:ring-gold-500/20'
-                            }`}
-                        value={customerPhone}
-                        onChange={e => {
-                            const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-                            setCustomerPhone(val);
-                            if (phoneError && val.length === 10 && /^[6-9]/.test(val)) setPhoneError('');
-                        }}
-                    />
-                    {phoneError && (
-                        <p className="text-red-400 text-xs mt-1.5 ml-1">{phoneError}</p>
-                    )}
-                    {customerPhone.length > 0 && customerPhone.length < 10 && (
-                        <p className="text-gold-300/30 text-xs mt-1.5 ml-1">{10 - customerPhone.length} digits remaining</p>
-                    )}
-                </div>
+
+                {!customerToken && (
+                    <>
+                        <div className="relative">
+                            <input
+                                type="text"
+                                placeholder={t('yourName')}
+                                required
+                                className="w-full p-4 bg-dark-700/50 border border-gold-600/20 rounded-xl text-gold-200 placeholder-gold-300/30 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/20 font-light"
+                                value={customerName}
+                                onChange={e => setCustomerName(e.target.value)}
+                            />
+                        </div>
+                        <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-300/30 text-sm">+91</div>
+                            <input
+                                type="tel"
+                                placeholder={t('yourPhone')}
+                                required
+                                maxLength={10}
+                                pattern="[6-9][0-9]{9}"
+                                className={`w-full p-4 pl-12 bg-dark-700/50 border rounded-xl text-gold-200 placeholder-gold-300/30 focus:outline-none focus:ring-1 font-light ${phoneError
+                                    ? 'border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20'
+                                    : 'border-gold-600/20 focus:border-gold-500/50 focus:ring-gold-500/20'
+                                    }`}
+                                value={customerPhone}
+                                onChange={e => {
+                                    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                    setCustomerPhone(val);
+                                    if (phoneError && val.length === 10 && /^[6-9]/.test(val)) setPhoneError('');
+                                }}
+                            />
+                            {phoneError && (
+                                <p className="text-red-400 text-xs mt-1.5 ml-1">{phoneError}</p>
+                            )}
+                            {customerPhone.length > 0 && customerPhone.length < 10 && (
+                                <p className="text-gold-300/30 text-xs mt-1.5 ml-1">{10 - customerPhone.length} digits remaining</p>
+                            )}
+                        </div>
+                    </>
+                )}
+
 
                 {/* Schedule / Pre-Order Toggle */}
                 <div className="glass-card-light p-4">
@@ -659,6 +756,138 @@ const Cart = ({ cart, removeFromCart, updateQuantity, clearCart, orderCount = 0 
                     )}
                 </button>
             </form>
+
+            {/* Auth Modal */}
+            <AnimatePresence>
+                {showAuthModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+                        onClick={() => setShowAuthModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            onClick={e => e.stopPropagation()}
+                            className="glass-card p-6 max-w-sm w-full space-y-5 relative"
+                            style={{ borderColor: 'rgba(212, 175, 55, 0.4)' }}
+                        >
+                            <button
+                                onClick={() => setShowAuthModal(false)}
+                                className="absolute top-4 right-4 text-gold-300/50 hover:text-gold-300"
+                            >
+                                <Trash2 size={16} className="hidden" /> {/* just to import something or use an X icon if imported */}
+                                ✕
+                            </button>
+                            <div className="text-center">
+                                <h3 className="text-2xl font-serif font-bold text-gradient-gold">
+                                    {authMode === 'login' ? 'Welcome Back' : 'Create Account'}
+                                </h3>
+                                <p className="text-xs text-gold-300/50 mt-1">
+                                    {authMode === 'login' ? 'Login to access your saved details' : 'Join the OG Biryani family'}
+                                </p>
+                            </div>
+
+                            <form onSubmit={handleAuth} className="space-y-3">
+                                {authMode === 'signup' && (
+                                    <input
+                                        type="text"
+                                        placeholder="Full Name"
+                                        required
+                                        value={customerName}
+                                        onChange={e => setCustomerName(e.target.value)}
+                                        className="w-full p-3 bg-dark-900 border border-gold-600/20 rounded-xl text-gold-200 text-sm focus:border-gold-500/50 outline-none"
+                                    />
+                                )}
+                                <div className="relative">
+                                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gold-300/30 text-sm">+91</div>
+                                    <input
+                                        type="tel"
+                                        placeholder="Phone Number"
+                                        required
+                                        maxLength={10}
+                                        value={customerPhone}
+                                        onChange={e => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                        className="w-full p-3 pl-11 bg-dark-900 border border-gold-600/20 rounded-xl text-gold-200 text-sm focus:border-gold-500/50 outline-none"
+                                    />
+                                </div>
+                                <div className="relative">
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        placeholder="Password"
+                                        required
+                                        value={authPassword}
+                                        onChange={e => setAuthPassword(e.target.value)}
+                                        className="w-full p-3 pr-10 bg-dark-900 border border-gold-600/20 rounded-xl text-gold-200 text-sm focus:border-gold-500/50 outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gold-300/40 hover:text-gold-300 transition-colors"
+                                    >
+                                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                                {authMode === 'login' && (
+                                    <div className="text-right mt-1">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setShowForgotPwd(true)}
+                                            className="text-[11px] text-gold-300/50 hover:text-gold-400 transition-colors"
+                                        >
+                                            Forgot Password?
+                                        </button>
+                                    </div>
+                                )}
+
+                                {authError && <p className="text-red-400 text-xs text-center">{authError}</p>}
+
+                                {showForgotPwd && (
+                                    <motion.div 
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: 'auto' }}
+                                        className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 text-center mt-2"
+                                    >
+                                        <p className="mb-2">Message us on WhatsApp to reset your password.</p>
+                                        <a 
+                                            href={`https://wa.me/919363164680?text=${encodeURIComponent("Hi, I forgot my OG Biryani password. Please help me reset it.")}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-2 bg-amber-500 text-dark-900 px-3 py-1.5 rounded-lg font-bold hover:bg-amber-400 transition-colors"
+                                        >
+                                            <MessageCircle size={14} /> Contact Support
+                                        </a>
+                                    </motion.div>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={authLoading}
+                                    className="w-full py-3 bg-gold-600 text-dark-900 font-bold rounded-xl btn-shimmer hover:bg-gold-500 disabled:opacity-50 mt-2"
+                                >
+                                    {authLoading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}
+                                </button>
+                            </form>
+
+                            <div className="text-center text-xs text-gold-300/60 mt-4">
+                                {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                                <button
+                                    onClick={() => {
+                                        setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                                        setAuthError('');
+                                    }}
+                                    className="text-gold-400 font-bold hover:underline"
+                                >
+                                    {authMode === 'login' ? 'Sign up' : 'Login'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Confirmation Modal */}
             <AnimatePresence>

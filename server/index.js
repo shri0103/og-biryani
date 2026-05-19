@@ -186,6 +186,85 @@ app.get('/api/admin/verify', authMiddleware, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ─── CUSTOMER AUTH ───────────────────────────────────
+// ═══════════════════════════════════════════════════════
+
+// Customer Signup
+app.post('/api/auth/customer/signup', (req, res) => {
+    const name = sanitize(req.body.name, 100);
+    const phone = sanitize(req.body.phone, 20);
+    const password = req.body.password;
+
+    if (!name || !isValidPhone(phone) || !password || password.length < 6) {
+        return res.status(400).json({ error: 'Valid name, phone, and password (min 6 chars) are required' });
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    db.run('INSERT INTO customers (name, phone, password) VALUES (?, ?, ?)', [name, phone, hashedPassword], function(err) {
+        if (err) {
+            if (err.code === 'ER_DUP_ENTRY' || err.message.includes('UNIQUE') || err.message.includes('Duplicate')) {
+                return res.status(400).json({ error: 'Phone number already registered' });
+            }
+            return safeError(res, 500, 'Signup failed', err);
+        }
+
+        const token = jwt.sign({ id: this.lastID, phone, name, role: 'customer' }, JWT_SECRET, { expiresIn: '30d' });
+        res.json({ message: 'Signup successful', token, customer: { id: this.lastID, name, phone } });
+    });
+});
+
+// Customer Login
+app.post('/api/auth/customer/login', loginLimiter, (req, res) => {
+    const phone = sanitize(req.body.phone, 20);
+    const password = req.body.password;
+
+    if (!phone || !password) return res.status(400).json({ error: 'Phone and password are required' });
+
+    db.get('SELECT * FROM customers WHERE phone = ?', [phone], (err, customer) => {
+        if (err) return safeError(res, 500, 'Login failed', err);
+        if (!customer) return res.status(401).json({ error: 'Invalid credentials' });
+
+        const isValid = bcrypt.compareSync(password, customer.password);
+        if (!isValid) return res.status(401).json({ error: 'Invalid credentials' });
+
+        const token = jwt.sign({ id: customer.id, phone: customer.phone, name: customer.name, role: 'customer' }, JWT_SECRET, { expiresIn: '30d' });
+        res.json({ message: 'Login successful', token, customer: { id: customer.id, name: customer.name, phone: customer.phone } });
+    });
+});
+
+const customerAuthMiddleware = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role !== 'customer') throw new Error('Not a customer');
+        req.customer = decoded;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+};
+
+app.get('/api/auth/customer/me', customerAuthMiddleware, (req, res) => {
+    db.get('SELECT id, name, phone, created_at FROM customers WHERE id = ?', [req.customer.id], (err, customer) => {
+        if (err || !customer) return res.status(404).json({ error: 'Customer not found' });
+        res.json({ customer });
+    });
+});
+
+app.get('/api/customer/orders', customerAuthMiddleware, (req, res) => {
+    db.all('SELECT * FROM orders WHERE customer_id = ? ORDER BY id DESC', [req.customer.id], (err, rows) => {
+        if (err) return safeError(res, 500, 'Failed to fetch orders', err);
+        res.json({ message: 'success', data: rows });
+    });
+});
+
+// ═══════════════════════════════════════════════════════
 // ─── MENU (Public: GET | Protected: POST, PUT, DELETE)
 // ═══════════════════════════════════════════════════════
 
@@ -216,6 +295,10 @@ app.post('/api/menu', authMiddleware, (req, res) => {
     const sql = 'INSERT INTO menu (name, description, price, category, image, tag, available_days) VALUES (?,?,?,?,?,?,?)';
     db.run(sql, [name, description, price, category, '', tag, available_days], function (err) {
         if (err) return safeError(res, 500, 'Failed to add menu item', err);
+
+        // Notify users about the new menu item
+        broadcastPush(`New Item: ${name} 🌟`, description, '/menu');
+
         res.json({
             message: 'Menu item added',
             data: { id: this.lastID, name, description, price, category, tag, available_days }
@@ -240,6 +323,10 @@ app.put('/api/menu/:id', authMiddleware, (req, res) => {
     db.run(sql, [name, description, price, category, tag, available_days, image, id], function (err) {
         if (err) return safeError(res, 500, 'Failed to update menu item', err);
         if (this.changes === 0) return res.status(404).json({ error: 'Menu item not found' });
+
+        // Notify users about the updated menu item
+        broadcastPush(`Updated: ${name} ✨`, `Check out the latest details for ${name}!`, '/menu');
+
         res.json({ message: 'Menu item updated', data: { id, name, description, price, category, tag, available_days } });
     });
 });
@@ -254,6 +341,14 @@ app.patch('/api/menu/:id/special', authMiddleware, (req, res) => {
         db.run('UPDATE menu SET is_today_special = 1 WHERE id = ?', [id], function (err) {
             if (err) return safeError(res, 500, 'Failed to update special', err);
             if (this.changes === 0) return res.status(404).json({ error: 'Menu item not found' });
+
+            // Fetch name to broadcast
+            db.get('SELECT name, description FROM menu WHERE id = ?', [id], (err2, item) => {
+                if (!err2 && item) {
+                    broadcastPush(`Today's Special: ${item.name}! 🌟`, item.description || `Don't miss our special today!`, '/menu');
+                }
+            });
+
             res.json({ message: "Today's special updated", data: { id } });
         });
     });
@@ -301,13 +396,16 @@ app.delete('/api/menu/:id', authMiddleware, (req, res) => {
 
 // Place Order (public, rate limited)
 app.post('/api/orders', orderLimiter, (req, res) => {
-    // 1. Enforce Server-Side Time Lock (6 AM to 1 PM)
-    const h = new Date().getHours();
+    // 1. Enforce Server-Side Time Lock (6 AM to 1 PM IST)
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
+    const h = istTime.getHours();
+    
     if (h < 6 || h >= 13) {
         return res.status(403).json({ error: 'Orders are currently closed. We are open from 6:00 AM to 1:00 PM.' });
     }
 
-    const { items, total } = req.body;
+    const { items, total, customerId } = req.body;
     const customerName = sanitize(req.body.customerName, 100);
     const customerPhone = sanitize(req.body.customerPhone, 20);
     const scheduledDate = req.body.scheduledDate || null; // YYYY-MM-DD or null
@@ -315,11 +413,21 @@ app.post('/api/orders', orderLimiter, (req, res) => {
 
     // Validate inputs
     if (!items || !Array.isArray(items) || items.length === 0) {
+        console.log('[ORDER ERROR] No items in order');
         return res.status(400).json({ error: 'Order must contain at least one item' });
     }
-    if (!customerName) return res.status(400).json({ error: 'Customer name is required' });
-    if (!isValidPhone(customerPhone)) return res.status(400).json({ error: 'Valid phone number is required' });
-    if (!total || isNaN(Number(total)) || Number(total) <= 0) return res.status(400).json({ error: 'Invalid total' });
+    if (!customerName) {
+        console.log('[ORDER ERROR] Missing customerName');
+        return res.status(400).json({ error: 'Customer name is required' });
+    }
+    if (!isValidPhone(customerPhone)) {
+        console.log(`[ORDER ERROR] Invalid phone: ${customerPhone}`);
+        return res.status(400).json({ error: 'Valid phone number is required' });
+    }
+    if (!total || isNaN(Number(total)) || Number(total) <= 0) {
+        console.log(`[ORDER ERROR] Invalid total: ${total}`);
+        return res.status(400).json({ error: 'Invalid total' });
+    }
 
     // 2. Prevent Fake Large Orders (e.g. ₹2.5 Lakh spoof)
     if (Number(total) > 5000) {
@@ -343,8 +451,8 @@ app.post('/api/orders', orderLimiter, (req, res) => {
     }));
 
     const orderToken = db.generateOrderToken();
-    const sql = 'INSERT INTO orders (items, total_amount, customer_name, customer_phone, status, order_token, scheduled_date, scheduled_time) VALUES (?,?,?,?,?,?,?,?)';
-    const params = [JSON.stringify(cleanItems), Number(total), customerName, customerPhone, 'Received', orderToken, scheduledDate, scheduledTime];
+    const sql = 'INSERT INTO orders (items, total_amount, customer_name, customer_phone, status, order_token, scheduled_date, scheduled_time, customer_id) VALUES (?,?,?,?,?,?,?,?,?)';
+    const params = [JSON.stringify(cleanItems), Number(total), customerName, customerPhone, 'Received', orderToken, scheduledDate, scheduledTime, customerId || null];
 
     db.run(sql, params, function (err) {
         if (err) return safeError(res, 500, 'Failed to place order', err);
@@ -720,6 +828,35 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
+// ─── AI BIRYANI BOT ────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+
+app.post('/api/chat', (req, res) => {
+    const message = (req.body.message || '').toLowerCase();
+    let reply = "I'm your Biryani Bot! How can I help you today?";
+
+    if (message.includes('spicy')) {
+        reply = "If you like it spicy, you should definitely try our Chicken 65 or the MT Biryani!";
+    } else if (message.includes('veg') || message.includes('vegetarian')) {
+        reply = "Currently, our menu focuses on authentic non-veg biryanis, but we have some sides and drinks! Keep an eye out as we expand our menu.";
+    } else if (message.includes('combo')) {
+        reply = "Our Special Combo includes MT Biryani, an Omelette, and a 7UP. It's a great value!";
+    } else if (message.includes('time') || message.includes('open')) {
+        reply = "We accept orders from 6:00 AM to 1:00 PM every day. Pre-order early so you don't miss out!";
+    } else if (message.includes('delivery') || message.includes('track')) {
+        reply = "Once you place an order, you can track it live using your Order Token on the Track page!";
+    } else if (message.includes('hello') || message.includes('hi')) {
+        reply = "Hello there! Craving some delicious biryani today?";
+    } else if (message.includes('discount') || message.includes('offer')) {
+        reply = "We have coupons like WELCOME10 for 10% off and OG20 for 20% off. Apply them at checkout!";
+    }
+
+    setTimeout(() => {
+        res.json({ reply });
+    }, 600); // Small delay to simulate typing
+});
+
+// ═══════════════════════════════════════════════════════
 // ─── PUSH NOTIFICATIONS ─────────────────────────────
 // ═══════════════════════════════════════════════════════
 
@@ -818,6 +955,37 @@ app.post('/api/push/broadcast', authMiddleware, (req, res) => {
         });
     });
 });
+
+// Helper: broadcast push notification to all subscribers
+function broadcastPush(title, body, url = '/menu') {
+    if (!process.env.VAPID_PUBLIC_KEY) return;
+
+    const payload = JSON.stringify({
+        title,
+        body,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+        vibrate: [200, 100, 200, 100, 200],
+        requireInteraction: true,
+        data: { url },
+    });
+
+    db.all('SELECT MIN(id) as id, endpoint, MAX(p256dh) as p256dh, MAX(auth) as auth FROM push_subscriptions GROUP BY endpoint', [], (err, subs) => {
+        if (err || !subs || subs.length === 0) return;
+
+        subs.forEach(sub => {
+            const pushSub = {
+                endpoint: sub.endpoint,
+                keys: { p256dh: sub.p256dh, auth: sub.auth },
+            };
+            webpush.sendNotification(pushSub, payload).catch(err => {
+                if (err.statusCode === 410 || err.statusCode === 404) {
+                    db.run('DELETE FROM push_subscriptions WHERE endpoint = ?', [sub.endpoint]);
+                }
+            });
+        });
+    });
+}
 
 // Helper: send push to all subscribers for an order token
 function sendPushForOrder(orderToken, status, customerName) {

@@ -265,6 +265,17 @@ function initializeDatabase() {
         if (err) console.error('Error creating push_subscriptions table:', err.message);
     });
 
+    // Create Customers Table
+    pool.query(`CREATE TABLE IF NOT EXISTS customers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(200),
+        phone VARCHAR(30) UNIQUE,
+        password VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`, (err) => {
+        if (err) console.error('Error creating customers table:', err.message);
+    });
+
     // ─── MIGRATIONS: add columns to existing tables safely ───
     pool.query('ALTER TABLE menu ADD COLUMN is_active INT DEFAULT 1', (err) => {
         if (err && !err.message.includes('Duplicate column')) {
@@ -279,6 +290,11 @@ function initializeDatabase() {
     pool.query('ALTER TABLE orders ADD COLUMN scheduled_time VARCHAR(20) DEFAULT NULL', (err) => {
         if (err && !err.message.includes('Duplicate column')) {
             console.error('Migration error (scheduled_time):', err.message);
+        }
+    });
+    pool.query('ALTER TABLE orders ADD COLUMN customer_id INT DEFAULT NULL', (err) => {
+        if (err && !err.message.includes('Duplicate column')) {
+            console.error('Migration error (customer_id):', err.message);
         }
     });
 }
