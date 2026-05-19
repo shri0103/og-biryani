@@ -76,7 +76,7 @@ app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 // 5. Global rate limit — 200 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 1000, // Increased from 200 to accommodate admin auto-refresh polling
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please try again later.' },
